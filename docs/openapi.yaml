@@ -1,0 +1,737 @@
+openapi: 3.1.0
+info:
+  title: FireScope API
+  description: API for MODIS and VIIRS active fire detection analysis.
+  version: 0.1.0
+paths:
+  /:
+    get:
+      summary: Root
+      operationId: root__get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/health:
+    get:
+      tags:
+      - Health
+      summary: Health Check
+      operationId: health_check_api_v1_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/detections:
+    get:
+      tags:
+      - Detections
+      summary: Fire detections as GeoJSON points
+      description: 'Individual hotspots inside the filters, newest first, ready to
+        drop onto
+
+        a Leaflet / MapLibre / OpenLayers map.
+
+
+        `truncated: true` in the response means more detections matched than
+
+        `limit`: zoom in, narrow the dates, or use `/detections/grid` instead.
+
+
+        `brightness` is the main brightness temperature (MODIS band 21/22 or
+
+        VIIRS I-4) and `bright_secondary` the second one (MODIS band 31 or
+
+        VIIRS I-5), so both sensors can share one colour scale in the frontend.'
+      operationId: list_detections_api_v1_detections_get
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 50000
+          minimum: 1
+          description: Maximum number of points returned.
+          default: 5000
+          title: Limit
+        description: Maximum number of points returned.
+      - name: bbox
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Map area as min_lon,min_lat,max_lon,max_lat (WGS84).
+          examples:
+          - 19.3,34.7,29.7,41.8
+          title: Bbox
+        description: Map area as min_lon,min_lat,max_lon,max_lat (WGS84).
+      - name: start_date
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          description: First day to include (UTC), e.g. 2025-07-01.
+          title: Start Date
+        description: First day to include (UTC), e.g. 2025-07-01.
+      - name: end_date
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          description: Last day to include (UTC), inclusive.
+          title: End Date
+        description: Last day to include (UTC), inclusive.
+      - name: sensor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              $ref: '#/components/schemas/Sensor'
+          - type: 'null'
+          description: MODIS and/or VIIRS. Repeat to pass both; omit for all.
+          title: Sensor
+        description: MODIS and/or VIIRS. Repeat to pass both; omit for all.
+      - name: data_product
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              $ref: '#/components/schemas/DataProduct'
+          - type: 'null'
+          description: archive and/or nrt. Omit for both.
+          title: Data Product
+        description: archive and/or nrt. Omit for both.
+      - name: daynight
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/DayNight'
+          - type: 'null'
+          description: D for daytime or N for night-time detections.
+          title: Daynight
+        description: D for daytime or N for night-time detections.
+      - name: min_frp
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: number
+            minimum: 0
+          - type: 'null'
+          description: Minimum fire radiative power (MW).
+          title: Min Frp
+        description: Minimum fire radiative power (MW).
+      responses:
+        '200':
+          description: GeoJSON FeatureCollection.
+          content:
+            application/geo+json:
+              schema:
+                type: object
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/detections/grid:
+    get:
+      tags:
+      - Detections
+      summary: Hotspots aggregated into grid cells (GeoJSON polygons)
+      description: 'Counts, total and max FRP per square cell. Use this for zoomed-out
+
+        views, heatmaps and "where are the hot spots" questions, where drawing
+
+        every point would be too slow. `max_count` helps scale the colours.'
+      operationId: detections_grid_api_v1_detections_grid_get
+      parameters:
+      - name: cell_size
+        in: query
+        required: false
+        schema:
+          type: number
+          maximum: 5
+          minimum: 0.01
+          description: Cell size in degrees (0.1 is about 11 km north-south).
+          default: 0.1
+          title: Cell Size
+        description: Cell size in degrees (0.1 is about 11 km north-south).
+      - name: bbox
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Map area as min_lon,min_lat,max_lon,max_lat (WGS84).
+          examples:
+          - 19.3,34.7,29.7,41.8
+          title: Bbox
+        description: Map area as min_lon,min_lat,max_lon,max_lat (WGS84).
+      - name: start_date
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          description: First day to include (UTC), e.g. 2025-07-01.
+          title: Start Date
+        description: First day to include (UTC), e.g. 2025-07-01.
+      - name: end_date
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          description: Last day to include (UTC), inclusive.
+          title: End Date
+        description: Last day to include (UTC), inclusive.
+      - name: sensor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              $ref: '#/components/schemas/Sensor'
+          - type: 'null'
+          description: MODIS and/or VIIRS. Repeat to pass both; omit for all.
+          title: Sensor
+        description: MODIS and/or VIIRS. Repeat to pass both; omit for all.
+      - name: data_product
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              $ref: '#/components/schemas/DataProduct'
+          - type: 'null'
+          description: archive and/or nrt. Omit for both.
+          title: Data Product
+        description: archive and/or nrt. Omit for both.
+      - name: daynight
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/DayNight'
+          - type: 'null'
+          description: D for daytime or N for night-time detections.
+          title: Daynight
+        description: D for daytime or N for night-time detections.
+      - name: min_frp
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: number
+            minimum: 0
+          - type: 'null'
+          description: Minimum fire radiative power (MW).
+          title: Min Frp
+        description: Minimum fire radiative power (MW).
+      responses:
+        '200':
+          description: GeoJSON FeatureCollection.
+          content:
+            application/geo+json:
+              schema:
+                type: object
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/detections/timeseries:
+    get:
+      tags:
+      - Detections
+      summary: Detection counts over time, per sensor
+      description: Number of detections and total FRP per day/week/month/year, for
+        charts.
+      operationId: detections_timeseries_api_v1_detections_timeseries_get
+      parameters:
+      - name: interval
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/Interval'
+          description: Bucket size for the time axis.
+          default: day
+        description: Bucket size for the time axis.
+      - name: bbox
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Map area as min_lon,min_lat,max_lon,max_lat (WGS84).
+          examples:
+          - 19.3,34.7,29.7,41.8
+          title: Bbox
+        description: Map area as min_lon,min_lat,max_lon,max_lat (WGS84).
+      - name: start_date
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          description: First day to include (UTC), e.g. 2025-07-01.
+          title: Start Date
+        description: First day to include (UTC), e.g. 2025-07-01.
+      - name: end_date
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          description: Last day to include (UTC), inclusive.
+          title: End Date
+        description: Last day to include (UTC), inclusive.
+      - name: sensor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              $ref: '#/components/schemas/Sensor'
+          - type: 'null'
+          description: MODIS and/or VIIRS. Repeat to pass both; omit for all.
+          title: Sensor
+        description: MODIS and/or VIIRS. Repeat to pass both; omit for all.
+      - name: data_product
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              $ref: '#/components/schemas/DataProduct'
+          - type: 'null'
+          description: archive and/or nrt. Omit for both.
+          title: Data Product
+        description: archive and/or nrt. Omit for both.
+      - name: daynight
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/DayNight'
+          - type: 'null'
+          description: D for daytime or N for night-time detections.
+          title: Daynight
+        description: D for daytime or N for night-time detections.
+      - name: min_frp
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: number
+            minimum: 0
+          - type: 'null'
+          description: Minimum fire radiative power (MW).
+          title: Min Frp
+        description: Minimum fire radiative power (MW).
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TimeSeriesPoint'
+                title: Response Detections Timeseries Api V1 Detections Timeseries
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/detections/coverage:
+    get:
+      tags:
+      - Detections
+      summary: What data is loaded
+      description: 'Totals, first/last dates and map extent of the loaded data. Useful
+        for
+
+        setting the frontend''s date picker limits and initial map view.'
+      operationId: detections_coverage_api_v1_detections_coverage_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Coverage'
+  /api/v1/detections/harmonized/cell/detections:
+    get:
+      tags:
+      - Detections
+      summary: Harmonized monthly detections for the grid cell containing coordinates
+      description: 'Maps coordinates to the harmonized 0.25 degree grid cell and returns
+
+        monthly detections for that cell. Each point includes its source
+
+        (VIIRS S-NPP or MODIS converted to VIIRS-equivalent).'
+      operationId: harmonized_cell_detections_api_v1_detections_harmonized_cell_detections_get
+      parameters:
+      - name: lat
+        in: query
+        required: true
+        schema:
+          type: number
+          maximum: 90
+          minimum: -90
+          description: Latitude in WGS84 decimal degrees.
+          title: Lat
+        description: Latitude in WGS84 decimal degrees.
+      - name: lon
+        in: query
+        required: true
+        schema:
+          type: number
+          maximum: 180
+          minimum: -180
+          description: Longitude in WGS84 decimal degrees.
+          title: Lon
+        description: Longitude in WGS84 decimal degrees.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HarmonizedCellDetectionsSeries'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/detections/harmonized/cell/frp:
+    get:
+      tags:
+      - Detections
+      summary: Harmonized monthly FRP for the grid cell containing coordinates
+      description: 'Maps coordinates to the harmonized 0.25 degree grid cell and returns
+
+        monthly FRP (MW) for that cell. Each point includes its source
+
+        (VIIRS S-NPP or MODIS converted to VIIRS-equivalent).'
+      operationId: harmonized_cell_frp_api_v1_detections_harmonized_cell_frp_get
+      parameters:
+      - name: lat
+        in: query
+        required: true
+        schema:
+          type: number
+          maximum: 90
+          minimum: -90
+          description: Latitude in WGS84 decimal degrees.
+          title: Lat
+        description: Latitude in WGS84 decimal degrees.
+      - name: lon
+        in: query
+        required: true
+        schema:
+          type: number
+          maximum: 180
+          minimum: -180
+          description: Longitude in WGS84 decimal degrees.
+          title: Lon
+        description: Longitude in WGS84 decimal degrees.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HarmonizedCellFrpSeries'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    Coverage:
+      properties:
+        total:
+          type: integer
+          title: Total
+        bbox:
+          anyOf:
+          - items:
+              type: number
+            type: array
+          - type: 'null'
+          title: Bbox
+          description: 'Extent of all detections: [min_lon, min_lat, max_lon, max_lat].'
+        first_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: First Date
+        last_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Last Date
+        by_source:
+          items:
+            $ref: '#/components/schemas/SensorCoverage'
+          type: array
+          title: By Source
+      type: object
+      required:
+      - total
+      - bbox
+      - first_date
+      - last_date
+      - by_source
+      title: Coverage
+    DataProduct:
+      type: string
+      enum:
+      - archive
+      - nrt
+      title: DataProduct
+    DayNight:
+      type: string
+      enum:
+      - D
+      - N
+      title: DayNight
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    HarmonizedCellDetectionsPoint:
+      properties:
+        month:
+          type: string
+          format: date
+          title: Month
+          description: Month bucket (UTC), stored as month start date.
+        detections:
+          type: number
+          title: Detections
+        source:
+          type: string
+          title: Source
+      type: object
+      required:
+      - month
+      - detections
+      - source
+      title: HarmonizedCellDetectionsPoint
+    HarmonizedCellDetectionsSeries:
+      properties:
+        gx:
+          type: integer
+          title: Gx
+        gy:
+          type: integer
+          title: Gy
+        lat:
+          type: number
+          title: Lat
+          description: Grid-cell center latitude.
+        lon:
+          type: number
+          title: Lon
+          description: Grid-cell center longitude.
+        points:
+          items:
+            $ref: '#/components/schemas/HarmonizedCellDetectionsPoint'
+          type: array
+          title: Points
+      type: object
+      required:
+      - gx
+      - gy
+      - lat
+      - lon
+      - points
+      title: HarmonizedCellDetectionsSeries
+    HarmonizedCellFrpPoint:
+      properties:
+        month:
+          type: string
+          format: date
+          title: Month
+          description: Month bucket (UTC), stored as month start date.
+        frp_mw:
+          type: number
+          title: Frp Mw
+        source:
+          type: string
+          title: Source
+      type: object
+      required:
+      - month
+      - frp_mw
+      - source
+      title: HarmonizedCellFrpPoint
+    HarmonizedCellFrpSeries:
+      properties:
+        gx:
+          type: integer
+          title: Gx
+        gy:
+          type: integer
+          title: Gy
+        lat:
+          type: number
+          title: Lat
+          description: Grid-cell center latitude.
+        lon:
+          type: number
+          title: Lon
+          description: Grid-cell center longitude.
+        points:
+          items:
+            $ref: '#/components/schemas/HarmonizedCellFrpPoint'
+          type: array
+          title: Points
+      type: object
+      required:
+      - gx
+      - gy
+      - lat
+      - lon
+      - points
+      title: HarmonizedCellFrpSeries
+    Interval:
+      type: string
+      enum:
+      - day
+      - week
+      - month
+      - year
+      title: Interval
+    Sensor:
+      type: string
+      enum:
+      - MODIS
+      - VIIRS
+      title: Sensor
+    SensorCoverage:
+      properties:
+        sensor:
+          $ref: '#/components/schemas/Sensor'
+        data_product:
+          $ref: '#/components/schemas/DataProduct'
+        count:
+          type: integer
+          title: Count
+        first_date:
+          type: string
+          format: date
+          title: First Date
+        last_date:
+          type: string
+          format: date
+          title: Last Date
+      type: object
+      required:
+      - sensor
+      - data_product
+      - count
+      - first_date
+      - last_date
+      title: SensorCoverage
+    TimeSeriesPoint:
+      properties:
+        period:
+          type: string
+          format: date
+          title: Period
+          description: Start of the day/week/month/year (UTC).
+        sensor:
+          $ref: '#/components/schemas/Sensor'
+        count:
+          type: integer
+          title: Count
+        total_frp:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Total Frp
+          description: Sum of fire radiative power (MW).
+      type: object
+      required:
+      - period
+      - sensor
+      - count
+      - total_frp
+      title: TimeSeriesPoint
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+
