@@ -9,7 +9,7 @@ import {
   fetchYear,
   fetchYearlyTotals,
 } from './api';
-import { buildSeriesGroups } from './seriesUtils';
+import { TimeSeriesChart } from './TimeSeriesChart';
 
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 
@@ -87,87 +87,6 @@ const fmtConfidence = (p) => {
 };
 
 const yearOf = (isoDate) => Number(String(isoDate).slice(0, 4));
-
-function TimeSeriesChart({ metric, series }) {
-  const groups = useMemo(
-    () => buildSeriesGroups(series, metric === 'frp' ? 'frp_mw' : 'detections'),
-    [metric, series],
-  );
-
-  if (!series || !Array.isArray(series.points) || !series.points.length || !groups.length) {
-    return <p className="notice">No monthly series available for this location.</p>;
-  }
-
-  const width = 270;
-  const height = 150;
-  const padding = 16;
-  const allValues = groups.flatMap((group) => group.points.map((point) => point.value));
-  const minY = Math.min(0, ...allValues);
-  const maxY = Math.max(...allValues, 1);
-  const yRange = Math.max(maxY - minY, 1);
-
-  const xAt = (index, total) => {
-    if (total <= 1) return padding + width / 2 - padding;
-    return padding + (index / (total - 1)) * (width - padding * 2);
-  };
-
-  const yAt = (value) => height - padding - ((value - minY) / yRange) * (height - padding * 2);
-
-  const axisLabels = groups[0]?.points ?? [];
-
-  return (
-    <div className="series-chart-wrap">
-      <svg viewBox={`0 0 ${width} ${height}`} className="series-chart" role="img" aria-label={`${SERIES_LABELS[metric]} series plot`}>
-        {[0, 0.5, 1].map((t) => {
-          const value = minY + yRange * t;
-          const y = yAt(value);
-          return (
-            <g key={t}>
-              <line x1={padding} x2={width - padding} y1={y} y2={y} stroke="rgba(255,255,255,0.12)" strokeDasharray="3 4" />
-              <text x={4} y={y + 4} fontSize="9" fill="rgba(253,246,227,0.7)" textAnchor="start">{fmt(value, 0)}</text>
-            </g>
-          );
-        })}
-
-        {groups.map((group) => {
-          const d = group.points
-            .map((point, index) => {
-              const x = xAt(index, group.points.length);
-              const y = yAt(point.value);
-              return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
-            })
-            .join(' ');
-
-          return <path key={group.source} d={d} fill="none" stroke={group.color} strokeWidth="2.25" strokeLinejoin="round" strokeLinecap="round" />;
-        })}
-
-        {axisLabels.length > 0 && (
-          <g>
-            {axisLabels.map((point, index) => {
-              const shouldLabel = index === 0 || index === axisLabels.length - 1 || index === Math.floor(axisLabels.length / 2);
-              if (!shouldLabel) return null;
-              const x = xAt(index, axisLabels.length);
-              return (
-                <text key={`${point.month}-${index}`} x={x} y={height - 4} fontSize="9" fill="rgba(253,246,227,0.7)" textAnchor="middle">
-                  {new Date(point.month).toLocaleDateString('en-US', { month: 'short' })}
-                </text>
-              );
-            })}
-          </g>
-        )}
-      </svg>
-
-      <div className="series-legend" aria-label="Time series legend">
-        {groups.map((group) => (
-          <div key={group.source} className="series-legend-item">
-            <span className="series-swatch" style={{ background: group.color }} aria-hidden="true" />
-            <span>{group.source}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 export function FireMap() {
   // Data range and per-year totals from the API.
@@ -443,57 +362,20 @@ export function FireMap() {
           </Source>
         )}
 
-        {selectionMode === 'select' && selectedPoint ? (
-          <Popup
-            longitude={selectedPoint.lon}
-            latitude={selectedPoint.lat}
-            anchor="bottom"
-            offset={12}
-            closeOnClick={false}
-            onClose={() => setSelectedPoint(null)}
-            maxWidth="320px"
-          >
-            <div className="point-popup">
-              <div className="point-popup-header">
-                <strong>Monthly series</strong>
-                <span>
-                  {selectedPoint.lat.toFixed(3)}, {selectedPoint.lon.toFixed(3)}
-                </span>
-              </div>
-
-              <div className="segmented point-series-toggle" role="group" aria-label="Monthly series metric">
-                <button
-                  type="button"
-                  className={selectedPoint.metric === 'detections' ? 'is-active' : ''}
-                  aria-pressed={selectedPoint.metric === 'detections'}
-                  onClick={() => handleMetricSwitch('detections')}
-                >
-                  Detections
-                </button>
-                <button
-                  type="button"
-                  className={selectedPoint.metric === 'frp' ? 'is-active' : ''}
-                  aria-pressed={selectedPoint.metric === 'frp'}
-                  onClick={() => handleMetricSwitch('frp')}
-                >
-                  FRP
-                </button>
-              </div>
-
-              {selectedPoint.error && (
-                <p className="notice notice-error">Could not load {SERIES_LABELS[selectedPoint.metric]}: {selectedPoint.error}</p>
-              )}
-
-              {selectedPoint.loadingMetric && (
-                <p className="notice">Loading {SERIES_LABELS[selectedPoint.loadingMetric]}…</p>
-              )}
-
-              {!selectedPoint.loadingMetric && activePointSeries && (
-                <TimeSeriesChart metric={selectedPoint.metric} series={activePointSeries} />
-              )}
-            </div>
-          </Popup>
-        ) : null}
+        {selectionMode === 'select' && selectedPoint && (
+          <div className="series-panel">
+            <TimeSeriesChart
+              metric={selectedPoint.metric}
+              series={activePointSeries}
+              onMetricChange={handleMetricSwitch}
+              loadingMetric={selectedPoint.loadingMetric}
+              error={selectedPoint.error}
+              title="Monthly series"
+              subtitle={`${selectedPoint.lat.toFixed(3)}, ${selectedPoint.lon.toFixed(3)}`}
+              onClose={() => setSelectedPoint(null)}
+            />
+          </div>
+        )}
 
         {popup && (
           <Popup
@@ -527,23 +409,7 @@ export function FireMap() {
       </MapGL>
 
       {/* ---------- Top-left card: sensor filter + live metrics ---------- */}
-      <section className="panel panel-info" aria-label="Sensor filter and summary">
-        <h1 className="panel-title">Greece wildfire hotspots</h1>
-
-        <div className="segmented" role="group" aria-label="Sensor source">
-          {SENSOR_OPTIONS.map((opt) => (
-            <button
-              key={opt.key}
-              type="button"
-              className={opt.key === sensorKey ? 'is-active' : ''}
-              aria-pressed={opt.key === sensorKey}
-              onClick={() => setSensorKey(opt.key)}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-
+      <div className="map-toolbar map-toolbar--top-right" aria-label="Map tools">
         <div className="segmented map-mode" role="group" aria-label="Map interaction mode">
           <button
             type="button"
@@ -561,6 +427,24 @@ export function FireMap() {
           >
             Select point
           </button>
+        </div>
+      </div>
+
+      <section className="panel panel-info" aria-label="Sensor filter and summary">
+        <h1 className="panel-title">Greece wildfire hotspots</h1>
+
+        <div className="segmented" role="group" aria-label="Sensor source">
+          {SENSOR_OPTIONS.map((opt) => (
+            <button
+              key={opt.key}
+              type="button"
+              className={opt.key === sensorKey ? 'is-active' : ''}
+              aria-pressed={opt.key === sensorKey}
+              onClick={() => setSensorKey(opt.key)}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
 
         <div className="stats" aria-live="polite">
