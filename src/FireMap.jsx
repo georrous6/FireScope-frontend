@@ -2,7 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapGL, { Source, Layer, NavigationControl, Popup } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-import { YEAR_LIMIT, fetchCoverage, fetchYear, fetchYearlyTotals } from './api';
+import {
+  YEAR_LIMIT,
+  fetchCoverage,
+  fetchHarmonizedCellSeries,
+  fetchYear,
+  fetchYearlyTotals,
+} from './api';
+import { buildSeriesGroups } from './seriesUtils';
 
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 
@@ -25,6 +32,13 @@ const SENSOR_NAMES = {
 };
 
 const VIIRS_CONFIDENCE = { l: 'Low', n: 'Nominal', h: 'High' };
+
+const SERIES_LABELS = {
+  detections: 'detections',
+  frp: 'FRP',
+};
+
+const formatCoordKey = (lat, lon) => `${Number(lat).toFixed(4)},${Number(lon).toFixed(4)}`;
 
 // Radius grows with FRP; the whole curve is scaled up as you zoom in.
 const radiusByFrp = (k) => [
@@ -74,6 +88,87 @@ const fmtConfidence = (p) => {
 
 const yearOf = (isoDate) => Number(String(isoDate).slice(0, 4));
 
+function TimeSeriesChart({ metric, series }) {
+  const groups = useMemo(
+    () => buildSeriesGroups(series, metric === 'frp' ? 'frp_mw' : 'detections'),
+    [metric, series],
+  );
+
+  if (!series || !Array.isArray(series.points) || !series.points.length || !groups.length) {
+    return <p className="notice">No monthly series available for this location.</p>;
+  }
+
+  const width = 270;
+  const height = 150;
+  const padding = 16;
+  const allValues = groups.flatMap((group) => group.points.map((point) => point.value));
+  const minY = Math.min(0, ...allValues);
+  const maxY = Math.max(...allValues, 1);
+  const yRange = Math.max(maxY - minY, 1);
+
+  const xAt = (index, total) => {
+    if (total <= 1) return padding + width / 2 - padding;
+    return padding + (index / (total - 1)) * (width - padding * 2);
+  };
+
+  const yAt = (value) => height - padding - ((value - minY) / yRange) * (height - padding * 2);
+
+  const axisLabels = groups[0]?.points ?? [];
+
+  return (
+    <div className="series-chart-wrap">
+      <svg viewBox={`0 0 ${width} ${height}`} className="series-chart" role="img" aria-label={`${SERIES_LABELS[metric]} series plot`}>
+        {[0, 0.5, 1].map((t) => {
+          const value = minY + yRange * t;
+          const y = yAt(value);
+          return (
+            <g key={t}>
+              <line x1={padding} x2={width - padding} y1={y} y2={y} stroke="rgba(255,255,255,0.12)" strokeDasharray="3 4" />
+              <text x={4} y={y + 4} fontSize="9" fill="rgba(253,246,227,0.7)" textAnchor="start">{fmt(value, 0)}</text>
+            </g>
+          );
+        })}
+
+        {groups.map((group) => {
+          const d = group.points
+            .map((point, index) => {
+              const x = xAt(index, group.points.length);
+              const y = yAt(point.value);
+              return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+            })
+            .join(' ');
+
+          return <path key={group.source} d={d} fill="none" stroke={group.color} strokeWidth="2.25" strokeLinejoin="round" strokeLinecap="round" />;
+        })}
+
+        {axisLabels.length > 0 && (
+          <g>
+            {axisLabels.map((point, index) => {
+              const shouldLabel = index === 0 || index === axisLabels.length - 1 || index === Math.floor(axisLabels.length / 2);
+              if (!shouldLabel) return null;
+              const x = xAt(index, axisLabels.length);
+              return (
+                <text key={`${point.month}-${index}`} x={x} y={height - 4} fontSize="9" fill="rgba(253,246,227,0.7)" textAnchor="middle">
+                  {new Date(point.month).toLocaleDateString('en-US', { month: 'short' })}
+                </text>
+              );
+            })}
+          </g>
+        )}
+      </svg>
+
+      <div className="series-legend" aria-label="Time series legend">
+        {groups.map((group) => (
+          <div key={group.source} className="series-legend-item">
+            <span className="series-swatch" style={{ background: group.color }} aria-hidden="true" />
+            <span>{group.source}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function FireMap() {
   // Data range and per-year totals from the API.
   const [meta, setMeta] = useState({ status: 'loading' });
@@ -85,11 +180,47 @@ export function FireMap() {
   const [sensorKey, setSensorKey] = useState('ALL');
   const [playing, setPlaying] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [selectionMode, setSelectionMode] = useState('pan');
+  const [selectedPoint, setSelectedPoint] = useState(null);
   const [cursor, setCursor] = useState('');
 
   const sensor = SENSOR_OPTIONS.find((s) => s.key === sensorKey);
   const minYear = meta.minYear ?? FALLBACK_MIN_YEAR;
   const maxYear = meta.maxYear ?? FALLBACK_MAX_YEAR;
+
+  const pointSeriesCache = useRef(new Map());
+  const pointSeriesRequestCache = useRef(new Map());
+
+  const loadPointSeries = useCallback((lat, lon, metric) => {
+    const key = formatCoordKey(lat, lon);
+    const cached = pointSeriesCache.current.get(key) ?? {};
+    if (cached[metric]) return Promise.resolve(cached[metric]);
+
+    const pending = pointSeriesRequestCache.current.get(key) ?? {};
+    if (pending[metric]) return pending[metric];
+
+    const request = fetchHarmonizedCellSeries(lat, lon, metric)
+      .then((data) => {
+        const next = pointSeriesCache.current.get(key) ?? {};
+        next[metric] = data;
+        pointSeriesCache.current.set(key, next);
+
+        const inFlight = pointSeriesRequestCache.current.get(key) ?? {};
+        inFlight[metric] = null;
+        pointSeriesRequestCache.current.set(key, inFlight);
+        return data;
+      })
+      .catch((error) => {
+        const inFlight = pointSeriesRequestCache.current.get(key) ?? {};
+        inFlight[metric] = null;
+        pointSeriesRequestCache.current.set(key, inFlight);
+        throw error;
+      });
+
+    pending[metric] = request;
+    pointSeriesRequestCache.current.set(key, pending);
+    return request;
+  }, []);
 
   // ---- Cache of year -> Promise<GeoJSON>, so each year is fetched once ----
   const cache = useRef(new Map());
@@ -103,6 +234,11 @@ export function FireMap() {
     }
     return cache.current.get(y);
   }, []);
+
+  useEffect(() => {
+    if (selectionMode === 'pan') return;
+    setSelected(null);
+  }, [selectionMode]);
 
   // ---- On start: which years exist, and totals for the stats panel ----
   useEffect(() => {
@@ -190,7 +326,7 @@ export function FireMap() {
       ? selected
       : null;
 
-  const handleClick = (e) => {
+  const handleFireClick = (e) => {
     const feature = e.features?.[0];
     if (!feature || !shown) {
       setSelected(null);
@@ -199,6 +335,77 @@ export function FireMap() {
     const [longitude, latitude] = feature.geometry.coordinates;
     setSelected({ longitude, latitude, year: shown.year, properties: feature.properties });
   };
+
+  const handlePointSelect = (e) => {
+    const { lat, lng } = e.lngLat;
+    const key = formatCoordKey(lat, lng);
+    const existing = pointSeriesCache.current.get(key) ?? {};
+    setSelectedPoint({
+      key,
+      lat,
+      lon: lng,
+      metric: 'detections',
+      loadingMetric: existing.detections ? null : 'detections',
+      detections: existing.detections ?? null,
+      frp: existing.frp ?? null,
+      error: null,
+    });
+    setSelected(null);
+
+    if (existing.detections) return;
+    loadPointSeries(lat, lng, 'detections')
+      .then((data) => {
+        setSelectedPoint((current) =>
+          current && current.key === key
+            ? { ...current, detections: data, loadingMetric: null, error: null }
+            : current,
+        );
+      })
+      .catch((err) => {
+        setSelectedPoint((current) =>
+          current && current.key === key
+            ? { ...current, loadingMetric: null, error: err.message }
+            : current,
+        );
+      });
+  };
+
+  const handleMetricSwitch = useCallback(
+    (metric) => {
+      if (!selectedPoint) return;
+      const { lat, lon, key } = selectedPoint;
+      const cached = pointSeriesCache.current.get(key) ?? {};
+      if (cached[metric]) {
+        setSelectedPoint((current) =>
+          current && current.key === key ? { ...current, metric, loadingMetric: null, error: null } : current,
+        );
+        return;
+      }
+
+      setSelectedPoint((current) =>
+        current && current.key === key ? { ...current, metric, loadingMetric: metric, error: null } : current,
+      );
+
+      loadPointSeries(lat, lon, metric)
+        .then((data) => {
+          setSelectedPoint((current) =>
+            current && current.key === key
+              ? { ...current, [metric]: data, loadingMetric: null, error: null }
+              : current,
+          );
+        })
+        .catch((err) => {
+          setSelectedPoint((current) =>
+            current && current.key === key
+              ? { ...current, loadingMetric: null, error: err.message }
+              : current,
+          );
+        });
+    },
+    [loadPointSeries, selectedPoint],
+  );
+
+  const activePointSeries = selectedPoint ? selectedPoint[selectedPoint.metric] : null;
 
   const handleSlider = (e) => {
     setPlaying(false);
@@ -215,9 +422,10 @@ export function FireMap() {
         initialViewState={INITIAL_VIEW}
         style={{ width: '100%', height: '100%' }}
         mapStyle={MAP_STYLE}
-        interactiveLayerIds={['fire-layer']}
-        cursor={cursor}
-        onClick={handleClick}
+        interactiveLayerIds={selectionMode === 'pan' ? ['fire-layer'] : []}
+        cursor={selectionMode === 'select' ? 'crosshair' : cursor}
+        dragPan={selectionMode === 'pan'}
+        onClick={selectionMode === 'select' ? handlePointSelect : handleFireClick}
         onMouseEnter={() => setCursor('pointer')}
         onMouseLeave={() => setCursor('')}
       >
@@ -234,6 +442,58 @@ export function FireMap() {
             />
           </Source>
         )}
+
+        {selectionMode === 'select' && selectedPoint ? (
+          <Popup
+            longitude={selectedPoint.lon}
+            latitude={selectedPoint.lat}
+            anchor="bottom"
+            offset={12}
+            closeOnClick={false}
+            onClose={() => setSelectedPoint(null)}
+            maxWidth="320px"
+          >
+            <div className="point-popup">
+              <div className="point-popup-header">
+                <strong>Monthly series</strong>
+                <span>
+                  {selectedPoint.lat.toFixed(3)}, {selectedPoint.lon.toFixed(3)}
+                </span>
+              </div>
+
+              <div className="segmented point-series-toggle" role="group" aria-label="Monthly series metric">
+                <button
+                  type="button"
+                  className={selectedPoint.metric === 'detections' ? 'is-active' : ''}
+                  aria-pressed={selectedPoint.metric === 'detections'}
+                  onClick={() => handleMetricSwitch('detections')}
+                >
+                  Detections
+                </button>
+                <button
+                  type="button"
+                  className={selectedPoint.metric === 'frp' ? 'is-active' : ''}
+                  aria-pressed={selectedPoint.metric === 'frp'}
+                  onClick={() => handleMetricSwitch('frp')}
+                >
+                  FRP
+                </button>
+              </div>
+
+              {selectedPoint.error && (
+                <p className="notice notice-error">Could not load {SERIES_LABELS[selectedPoint.metric]}: {selectedPoint.error}</p>
+              )}
+
+              {selectedPoint.loadingMetric && (
+                <p className="notice">Loading {SERIES_LABELS[selectedPoint.loadingMetric]}…</p>
+              )}
+
+              {!selectedPoint.loadingMetric && activePointSeries && (
+                <TimeSeriesChart metric={selectedPoint.metric} series={activePointSeries} />
+              )}
+            </div>
+          </Popup>
+        ) : null}
 
         {popup && (
           <Popup
@@ -282,6 +542,25 @@ export function FireMap() {
               {opt.label}
             </button>
           ))}
+        </div>
+
+        <div className="segmented map-mode" role="group" aria-label="Map interaction mode">
+          <button
+            type="button"
+            className={selectionMode === 'pan' ? 'is-active' : ''}
+            aria-pressed={selectionMode === 'pan'}
+            onClick={() => setSelectionMode('pan')}
+          >
+            Pan
+          </button>
+          <button
+            type="button"
+            className={selectionMode === 'select' ? 'is-active' : ''}
+            aria-pressed={selectionMode === 'select'}
+            onClick={() => setSelectionMode('select')}
+          >
+            Select point
+          </button>
         </div>
 
         <div className="stats" aria-live="polite">
