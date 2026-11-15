@@ -160,14 +160,26 @@ export function TimeSeriesChart({
 
   const [range, setRange] = useState(defaultRange);
   const [visibleSources, setVisibleSources] = useState({});
+
   const [panelSize, setPanelSize] = useState({
     width: 640,
     height: 430,
   });
+
+  // Position of the floating chart relative to its original location.
+  const [panelPosition, setPanelPosition] = useState({
+    x: 0,
+    y: 0,
+  });
+
+  const [isDragging, setIsDragging] = useState(false);
+
   const [hoveredMonthIndex, setHoveredMonthIndex] = useState(null);
   const [tooltipLeft, setTooltipLeft] = useState(50);
 
   const resizeRef = useRef(null);
+  const dragRef = useRef(null);
+
   const chartHostRef = useRef(null);
   const chartInstanceRef = useRef(null);
 
@@ -514,32 +526,52 @@ export function TimeSeriesChart({
     };
   }, [loadingMetric, visibleGroups, monthList, valueMaps, metric]);
 
-  // Resize the floating panel by dragging its bottom-right corner.
+  // Handle dragging and resizing of the floating chart window.
   useEffect(() => {
     const handlePointerMove = (event) => {
-      if (!resizeRef.current) return;
+      // Move the chart window.
+      if (dragRef.current) {
+        const {
+          startX,
+          startY,
+          initialX,
+          initialY,
+        } = dragRef.current;
 
-      const {
-        startX,
-        startY,
-        startWidth,
-        startHeight,
-      } = resizeRef.current;
+        setPanelPosition({
+          x: initialX + (event.clientX - startX),
+          y: initialY + (event.clientY - startY),
+        });
 
-      setPanelSize({
-        width: Math.max(
-          360,
-          startWidth + (event.clientX - startX),
-        ),
-        height: Math.max(
-          300,
-          startHeight + (event.clientY - startY),
-        ),
-      });
+        return;
+      }
+
+      // Resize the chart window.
+      if (resizeRef.current) {
+        const {
+          startX,
+          startY,
+          startWidth,
+          startHeight,
+        } = resizeRef.current;
+
+        setPanelSize({
+          width: Math.max(
+            360,
+            startWidth + (event.clientX - startX),
+          ),
+          height: Math.max(
+            300,
+            startHeight + (event.clientY - startY),
+          ),
+        });
+      }
     };
 
     const handlePointerUp = () => {
       resizeRef.current = null;
+      dragRef.current = null;
+      setIsDragging(false);
     };
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -550,6 +582,26 @@ export function TimeSeriesChart({
       window.removeEventListener('pointerup', handlePointerUp);
     };
   }, []);
+
+  // Start dragging when the chart header is pressed.
+  const handleHeaderPointerDown = (event) => {
+    // Do not start dragging when the close button is clicked.
+    if (event.target.closest('button')) return;
+
+    // Only respond to the primary mouse button.
+    if (event.button !== 0) return;
+
+    dragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      initialX: panelPosition.x,
+      initialY: panelPosition.y,
+    };
+
+    setIsDragging(true);
+
+    event.preventDefault();
+  };
 
   const handleSourceToggle = (source) => {
     setVisibleSources((current) => ({
@@ -638,9 +690,18 @@ export function TimeSeriesChart({
       style={{
         width: `${panelSize.width}px`,
         height: `${panelSize.height}px`,
+        transform: `translate3d(${panelPosition.x}px, ${panelPosition.y}px, 0)`,
       }}
     >
-      <div className="series-window__header">
+      <div
+        className="series-window__header"
+        onPointerDown={handleHeaderPointerDown}
+        style={{
+          cursor: isDragging ? 'grabbing' : 'grab',
+          userSelect: 'none',
+          touchAction: 'none',
+        }}
+      >
         <div>
           <div className="series-window__title">{title}</div>
           {subtitle && (
@@ -654,6 +715,10 @@ export function TimeSeriesChart({
             className="series-window__close"
             onClick={onClose}
             aria-label="Close chart"
+            style={{
+              cursor: 'pointer',
+              touchAction: 'auto',
+            }}
           >
             ×
           </button>
@@ -884,6 +949,7 @@ export function TimeSeriesChart({
           };
 
           event.preventDefault();
+          event.stopPropagation();
         }}
       />
     </div>
