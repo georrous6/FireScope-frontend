@@ -1,9 +1,34 @@
 import { useEffect, useState } from 'react';
 
-import { fetchHarmonizedCellSeries } from './api';
+import {
+  fetchHarmonizedCellForecast,
+  fetchHarmonizedCellSeries,
+} from './api';
 import { TimeSeriesChart } from './TimeSeriesChart';
 
 const formatCoordinate = (value) => Number(value).toFixed(3);
+const FORECAST_SOURCE = 'Forecast';
+
+const monthKey = (value) => String(value ?? '').slice(0, 7);
+
+const getMonthSpanInclusive = (startMonth, endMonth) => {
+  const start = new Date(`${monthKey(startMonth)}-01T00:00:00Z`);
+  const end = new Date(`${monthKey(endMonth)}-01T00:00:00Z`);
+
+  if (
+    Number.isNaN(start.getTime()) ||
+    Number.isNaN(end.getTime()) ||
+    start > end
+  ) {
+    return 0;
+  }
+
+  return (
+    (end.getUTCFullYear() - start.getUTCFullYear()) * 12 +
+    (end.getUTCMonth() - start.getUTCMonth()) +
+    1
+  );
+};
 
 export function ChartPage() {
   const params = new URLSearchParams(window.location.search);
@@ -56,30 +81,80 @@ export function ChartPage() {
     startMonth,
     endMonth,
   }) => {
-    /*
-     * TODO: Replace this with the actual forecasting API call.
-     *
-     * Expected request parameters:
-     * - lat
-     * - lon
-     * - metric
-     * - startMonth
-     * - endMonth
-     *
-     * The returned forecast data should eventually be merged
-     * into the series state using setSeries().
-     */
-    console.log('Forecast request:', {
+    const horizon = getMonthSpanInclusive(startMonth, endMonth);
+
+    if (!horizon) {
+      throw new Error('Invalid forecast month range.');
+    }
+
+    const response = await fetchHarmonizedCellForecast(
       lat,
       lon,
-      metric: selectedMetric,
-      startMonth,
-      endMonth,
-    });
-
-    throw new Error(
-      'The forecasting endpoint has not been connected yet.',
+      selectedMetric,
+      Math.min(12, Math.max(1, horizon)),
     );
+
+    const forecastPoints = Array.isArray(response?.forecast)
+      ? response.forecast
+          .filter((point) => {
+            const month = monthKey(point?.month);
+
+            return (
+              month &&
+              month >= monthKey(startMonth) &&
+              month <= monthKey(endMonth)
+            );
+          })
+          .map((point) => ({
+            month: point.month,
+            source: FORECAST_SOURCE,
+
+            detections:
+              selectedMetric === 'detections'
+                ? Number(point.value)
+                : null,
+
+            frp_mw:
+              selectedMetric === 'frp'
+                ? Number(point.value)
+                : null,
+
+            // Preserve the forecast confidence interval.
+            lower_bound:
+              point.lower_bound == null
+                ? null
+                : Number(point.lower_bound),
+
+            upper_bound:
+              point.upper_bound == null
+                ? null
+                : Number(point.upper_bound),
+          }))
+      : [];
+
+    if (!forecastPoints.length) {
+      throw new Error('Forecast service returned no points.');
+    }
+
+    setSeries((current) => {
+      const existingPoints = Array.isArray(current?.points)
+        ? current.points
+        : [];
+
+      // Keep historical data and replace any previous forecast.
+      const pointsWithoutForecast = existingPoints.filter(
+        (point) => String(point?.source ?? '') !== FORECAST_SOURCE,
+      );
+
+      return {
+        ...(current ?? {}),
+        gx: response?.gx ?? current?.gx,
+        gy: response?.gy ?? current?.gy,
+        lat: response?.lat ?? current?.lat,
+        lon: response?.lon ?? current?.lon,
+        points: [...pointsWithoutForecast, ...forecastPoints],
+      };
+    });
   };
 
   if (!validCoordinates) {

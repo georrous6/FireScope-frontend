@@ -487,6 +487,76 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/detections/harmonized/cell/forecast:
+    get:
+      tags:
+      - Detections
+      summary: Forecast harmonized monthly fire activity for a grid cell
+      description: 'Forecast monthly fire activity for the harmonized 0.25 degree
+        grid cell
+
+        containing the supplied coordinates.
+
+
+        The service retrieves the historical harmonized time series, fits the
+
+        forecasting model and returns the predictions.
+
+
+        The forecast represents the entire grid cell, not the exact coordinates.'
+      operationId: forecast_harmonized_cell_api_v1_detections_harmonized_cell_forecast_get
+      parameters:
+      - name: lat
+        in: query
+        required: true
+        schema:
+          type: number
+          maximum: 90
+          minimum: -90
+          description: Latitude in WGS84 decimal degrees.
+          title: Lat
+        description: Latitude in WGS84 decimal degrees.
+      - name: lon
+        in: query
+        required: true
+        schema:
+          type: number
+          maximum: 180
+          minimum: -180
+          description: Longitude in WGS84 decimal degrees.
+          title: Lon
+        description: Longitude in WGS84 decimal degrees.
+      - name: metric
+        in: query
+        required: true
+        schema:
+          $ref: '#/components/schemas/ForecastMetric'
+          description: 'Metric to forecast: detections or FRP.'
+        description: 'Metric to forecast: detections or FRP.'
+      - name: horizon
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 12
+          minimum: 1
+          description: "Number of future months to forecast (1\u201312)."
+          default: 12
+          title: Horizon
+        description: "Number of future months to forecast (1\u201312)."
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HarmonizedCellForecast'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     Coverage:
@@ -539,6 +609,53 @@ components:
       - D
       - N
       title: DayNight
+    ForecastHistoricalPoint:
+      properties:
+        month:
+          type: string
+          format: date
+          title: Month
+        value:
+          type: number
+          title: Value
+      type: object
+      required:
+      - month
+      - value
+      title: ForecastHistoricalPoint
+    ForecastMetric:
+      type: string
+      enum:
+      - detections
+      - frp
+      title: ForecastMetric
+    ForecastPoint:
+      properties:
+        month:
+          type: string
+          format: date
+          title: Month
+          description: Forecast month, stored as month start date.
+        value:
+          type: number
+          title: Value
+        lower_bound:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Lower Bound
+          description: Lower prediction interval bound, when available.
+        upper_bound:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Upper Bound
+          description: Upper prediction interval bound, when available.
+      type: object
+      required:
+      - month
+      - value
+      title: ForecastPoint
     HTTPValidationError:
       properties:
         detail:
@@ -596,6 +713,67 @@ components:
       - lon
       - points
       title: HarmonizedCellDetectionsSeries
+    HarmonizedCellForecast:
+      properties:
+        gx:
+          type: integer
+          title: Gx
+        gy:
+          type: integer
+          title: Gy
+        lat:
+          type: number
+          title: Lat
+          description: Grid-cell center latitude.
+        lon:
+          type: number
+          title: Lon
+          description: Grid-cell center longitude.
+        metric:
+          $ref: '#/components/schemas/ForecastMetric'
+        unit:
+          type: string
+          title: Unit
+        horizon:
+          type: integer
+          title: Horizon
+        model:
+          type: string
+          title: Model
+          description: Forecasting model used.
+        historical_points:
+          type: integer
+          title: Historical Points
+        sources:
+          items:
+            type: string
+          type: array
+          title: Sources
+        historical_data:
+          items:
+            $ref: '#/components/schemas/ForecastHistoricalPoint'
+          type: array
+          title: Historical Data
+        forecast:
+          items:
+            $ref: '#/components/schemas/ForecastPoint'
+          type: array
+          title: Forecast
+      type: object
+      required:
+      - gx
+      - gy
+      - lat
+      - lon
+      - metric
+      - unit
+      - horizon
+      - model
+      - historical_points
+      - sources
+      - historical_data
+      - forecast
+      title: HarmonizedCellForecast
     HarmonizedCellFrpPoint:
       properties:
         month:
@@ -734,4 +912,3 @@ components:
       - msg
       - type
       title: ValidationError
-

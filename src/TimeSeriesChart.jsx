@@ -9,6 +9,9 @@ import {
   getDefaultMonthRange,
 } from './seriesUtils';
 
+const FORECAST_SOURCE = 'Forecast';
+const FORECAST_MONTH_COUNT = 12;
+
 const monthKey = (value) => String(value ?? '').slice(0, 7);
 
 const MONTH_SELECT_OPTIONS = [
@@ -37,8 +40,6 @@ const COLOR_STOPS = [
   { position: 1, color: '#f03b20' },
 ];
 
-const FORECAST_MONTH_COUNT = 12;
-
 const parseMonthParts = (value) => {
   const key = monthKey(value);
   const match = key.match(/^(\d{4})-(\d{2})$/);
@@ -66,8 +67,8 @@ const shiftMonth = (value, offset) => {
 const monthListBetween = (startMonth, endMonth) => {
   if (!startMonth || !endMonth) return [];
 
-  const start = new Date(`${startMonth}-01T00:00:00Z`);
-  const end = new Date(`${endMonth}-01T00:00:00Z`);
+  const start = new Date(`${monthKey(startMonth)}-01T00:00:00Z`);
+  const end = new Date(`${monthKey(endMonth)}-01T00:00:00Z`);
 
   if (
     Number.isNaN(start.getTime()) ||
@@ -142,6 +143,26 @@ const getPointValueMap = (group) =>
     ]),
   );
 
+const getForecastMetadataMap = (points) =>
+  new Map(
+    points
+      .filter(
+        (point) =>
+          String(point?.source ?? '') === FORECAST_SOURCE,
+      )
+      .map((point) => [
+        monthKey(point.month),
+        {
+          lowerBound: Number.isFinite(Number(point.lower_bound))
+            ? Number(point.lower_bound)
+            : null,
+          upperBound: Number.isFinite(Number(point.upper_bound))
+            ? Number(point.upper_bound)
+            : null,
+        },
+      ]),
+  );
+
 const formatAxisValue = (value, metric) => {
   if (!Number.isFinite(value)) return '';
 
@@ -179,7 +200,9 @@ const getMetricColor = (value, min, max) => {
   if (!Number.isFinite(value)) return 'transparent';
 
   const normalized =
-    max === min ? 0.5 : Math.max(0, Math.min(1, (value - min) / (max - min)));
+    max === min
+      ? 0.5
+      : Math.max(0, Math.min(1, (value - min) / (max - min)));
 
   for (let index = 0; index < COLOR_STOPS.length - 1; index += 1) {
     const current = COLOR_STOPS[index];
@@ -214,20 +237,44 @@ export function TimeSeriesChart({
 
   const rawPoints = Array.isArray(series?.points) ? series.points : [];
 
+  /*
+   * Keep historical and forecast observations separate.
+   *
+   * Forecast points must never affect the historical month range
+   * or the automatically determined forecast starting month.
+   */
+  const historicalPoints = useMemo(
+    () =>
+      rawPoints.filter(
+        (point) =>
+          String(point?.source ?? '') !== FORECAST_SOURCE,
+      ),
+    [rawPoints],
+  );
+
+  const forecastPoints = useMemo(
+    () =>
+      rawPoints.filter(
+        (point) =>
+          String(point?.source ?? '') === FORECAST_SOURCE,
+      ),
+    [rawPoints],
+  );
+
   const monthOptions = useMemo(
     () =>
       Array.from(
         new Set(
-          rawPoints
+          historicalPoints
             .map((point) => monthKey(point.month))
             .filter((month) => parseMonthParts(month)),
         ),
       ).sort(),
-    [rawPoints],
+    [historicalPoints],
   );
 
   const defaultRange = useMemo(
-    () => getDefaultMonthRange(monthOptions, new Date()),
+    () => getDefaultMonthRange(monthOptions),
     [monthOptions],
   );
 
@@ -242,20 +289,14 @@ export function TimeSeriesChart({
   );
 
   /*
-   * Find the first calendar month without a valid observation
-   * for the currently selected metric.
-   *
-   * A month is considered historical if at least one source has
-   * a valid value for that metric. A value of zero is valid.
-   *
-   * If there are no gaps in the historical period, the forecast
-   * starts in the month immediately following the latest month.
+   * Determine the first calendar month without a valid historical
+   * observation for the selected metric.
    */
   const forecastStartMonth = useMemo(() => {
     if (!monthOptions.length) return null;
 
     const observedMonths = new Set(
-      rawPoints
+      historicalPoints
         .filter((point) => {
           const value = point?.[metricKey];
 
@@ -284,17 +325,14 @@ export function TimeSeriesChart({
     }
 
     return shiftMonth(monthOptions.at(-1), 1);
-  }, [rawPoints, monthOptions, metricKey]);
+  }, [historicalPoints, monthOptions, metricKey]);
 
-  /*
-   * The forecast window contains 12 consecutive months,
-   * beginning with the first month without a metric observation.
-   */
   const forecastMonthOptions = useMemo(() => {
     if (!forecastStartMonth) return [];
 
-    return Array.from({ length: FORECAST_MONTH_COUNT }, (_, index) =>
-      shiftMonth(forecastStartMonth, index),
+    return Array.from(
+      { length: FORECAST_MONTH_COUNT },
+      (_, index) => shiftMonth(forecastStartMonth, index),
     ).filter(Boolean);
   }, [forecastStartMonth]);
 
@@ -343,11 +381,7 @@ export function TimeSeriesChart({
     });
   }, [defaultRange, monthOptions]);
 
-  /*
-   * If the automatically determined forecast start month changes,
-   * clear the previously selected end date. The user must select
-   * an end date for the new forecast period.
-   */
+  // Reset the forecast selection when its starting month changes.
   useEffect(() => {
     if (previousForecastStartRef.current !== forecastStartMonth) {
       setForecastEndMonth(null);
@@ -361,11 +395,15 @@ export function TimeSeriesChart({
   useEffect(() => {
     const sources = Array.from(
       new Set(
-        rawPoints.map((point) =>
+        historicalPoints.map((point) =>
           String(point?.source ?? 'Unknown source'),
         ),
       ),
     );
+
+    if (forecastPoints.length) {
+      sources.push(FORECAST_SOURCE);
+    }
 
     setVisibleSources((current) => {
       const next = {};
@@ -376,8 +414,11 @@ export function TimeSeriesChart({
 
       return next;
     });
-  }, [rawPoints]);
+  }, [historicalPoints, forecastPoints]);
 
+  /*
+   * Select the date range for the current mode.
+   */
   const effectiveRange = useMemo(() => {
     if (timeMode === 'forecast') {
       return {
@@ -390,30 +431,42 @@ export function TimeSeriesChart({
   }, [timeMode, forecastStartMonth, forecastEndMonth, range]);
 
   /*
-   * In History mode, only points inside the selected historical
-   * range are used.
+   * This is the key separation:
    *
-   * In Forecast mode, retain all source groups so the chart and
-   * legend remain available across the future date range.
+   * History mode  -> historical points only.
+   * Forecast mode -> forecast points only.
+   *
+   * Historical and forecasted observations are never plotted
+   * together.
    */
+  const displayedSeries = useMemo(() => {
+    if (timeMode === 'forecast') {
+      return {
+        ...(series ?? {}),
+        points: forecastPoints,
+      };
+    }
+
+    return {
+      ...(series ?? {}),
+      points: historicalPoints,
+    };
+  }, [series, timeMode, forecastPoints, historicalPoints]);
+
   const filteredSeries = useMemo(
     () =>
       timeMode === 'forecast'
-        ? series
+        ? displayedSeries
         : filterSeriesForMonthRange(
-            series,
+            displayedSeries,
             effectiveRange.start,
             effectiveRange.end,
           ),
-    [series, timeMode, effectiveRange],
+    [displayedSeries, timeMode, effectiveRange],
   );
 
   const groups = useMemo(
-    () =>
-      buildSeriesGroups(
-        filteredSeries,
-        metricKey,
-      ),
+    () => buildSeriesGroups(filteredSeries, metricKey),
     [filteredSeries, metricKey],
   );
 
@@ -438,9 +491,12 @@ export function TimeSeriesChart({
     [groups],
   );
 
-  const hasSeries = Boolean(
-    series && Array.isArray(series.points) && series.points.length,
+  const forecastMetadataMap = useMemo(
+    () => getForecastMetadataMap(forecastPoints),
+    [forecastPoints],
   );
+
+  const hasSeries = historicalPoints.length > 0;
 
   const hoveredMonth =
     hoveredMonthIndex === null ? null : monthList[hoveredMonthIndex];
@@ -456,6 +512,10 @@ export function TimeSeriesChart({
           ({ value }) => value !== undefined && Number.isFinite(value),
         )
     : [];
+
+  const forecastMetadata = hoveredMonth
+    ? forecastMetadataMap.get(monthKey(hoveredMonth))
+    : null;
 
   const startSelection = useMemo(() => {
     if (timeMode === 'forecast') {
@@ -488,10 +548,12 @@ export function TimeSeriesChart({
   const endSelection = useMemo(() => {
     if (timeMode === 'forecast') {
       if (forecastEndMonth) {
-        return parseMonthParts(forecastEndMonth) ?? {
-          year: '',
-          month: '',
-        };
+        return (
+          parseMonthParts(forecastEndMonth) ?? {
+            year: '',
+            month: '',
+          }
+        );
       }
 
       return {
@@ -544,8 +606,8 @@ export function TimeSeriesChart({
   );
 
   /*
-   * Build sidebar entries from exactly the same visible groups
-   * and month range used to construct the chart.
+   * Build sidebar entries from exactly the same groups and month
+   * range used to construct the chart.
    */
   const calendarEntries = useMemo(() => {
     const allValues = [];
@@ -585,7 +647,9 @@ export function TimeSeriesChart({
       .reverse();
   }, [monthList, visibleGroups, valueMaps]);
 
-  // Create and manage the uPlot instance.
+  /*
+   * Create and manage the uPlot instance.
+   */
   useEffect(() => {
     const host = chartHostRef.current;
 
@@ -691,9 +755,10 @@ export function TimeSeriesChart({
         ...visibleGroups.map((group) => ({
           label: group.source,
           stroke: group.color,
-          width: 2.25,
+          width: 2.5,
+          dash: timeMode === 'forecast' ? [7, 4] : [],
           points: {
-            show: false,
+            show: true,
             size: 5,
             width: 1,
             stroke: group.color,
@@ -800,7 +865,14 @@ export function TimeSeriesChart({
         chartInstanceRef.current = null;
       }
     };
-  }, [loadingMetric, visibleGroups, monthList, valueMaps, metric]);
+  }, [
+    loadingMetric,
+    visibleGroups,
+    monthList,
+    valueMaps,
+    metric,
+    timeMode,
+  ]);
 
   const handleSourceToggle = (source) => {
     setVisibleSources((current) => ({
@@ -879,6 +951,7 @@ export function TimeSeriesChart({
     if (!canRunForecast) return;
 
     setForecastRequestError('');
+    setHoveredMonthIndex(null);
 
     if (typeof onRunForecast !== 'function') {
       setForecastRequestError(
@@ -923,7 +996,6 @@ export function TimeSeriesChart({
     );
   }
 
-  // Both switches use the same width and equally sized buttons.
   const switchStyle = {
     display: 'flex',
     width: '180px',
@@ -996,6 +1068,56 @@ export function TimeSeriesChart({
 
   return (
     <section className="series-window series-window--fullscreen">
+      <style>
+        {`
+          @keyframes firescope-forecast-spin {
+            to {
+              transform: rotate(360deg);
+            }
+          }
+
+          @keyframes firescope-forecast-pulse {
+            0%, 100% {
+              opacity: 0.55;
+            }
+            50% {
+              opacity: 1;
+            }
+          }
+
+          .firescope-forecast-loading {
+            position: absolute;
+            inset: 0;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            background: rgba(18, 15, 13, 0.82);
+            backdrop-filter: blur(4px);
+            border-radius: 10px;
+            color: #fdf6e3;
+          }
+
+          .firescope-forecast-spinner {
+            width: 38px;
+            height: 38px;
+            border: 3px solid rgba(253, 246, 227, 0.2);
+            border-top-color: #feb24c;
+            border-radius: 50%;
+            animation: firescope-forecast-spin 0.8s linear infinite;
+          }
+
+          .firescope-forecast-loading-text {
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            animation: firescope-forecast-pulse 1.5s ease-in-out infinite;
+          }
+        `}
+      </style>
+
       <div className="series-window__main">
         <div className="series-window__header">
           <div>
@@ -1010,12 +1132,10 @@ export function TimeSeriesChart({
           className="series-window__toolbar"
           style={toolbarStyle}
         >
-          {/* Left side: switches */}
           <div
             className="series-window__toolbar-switches"
             style={switchesContainerStyle}
           >
-            {/* History / Forecast selector */}
             <div
               className="segmented point-series-toggle"
               role="group"
@@ -1052,7 +1172,6 @@ export function TimeSeriesChart({
               </button>
             </div>
 
-            {/* Detections / FRP selector */}
             <div
               className="segmented point-series-toggle"
               role="group"
@@ -1093,7 +1212,6 @@ export function TimeSeriesChart({
             </div>
           </div>
 
-          {/* Right side: Start / End selectors and Forecast button */}
           <div
             className="series-window__range"
             aria-label="Month range selector"
@@ -1194,11 +1312,7 @@ export function TimeSeriesChart({
                   onChange={(event) =>
                     handleYearPartChange('end', event.target.value)
                   }
-                  disabled={
-                    timeMode === 'forecast'
-                      ? !endYearOptions.length
-                      : !endYearOptions.length
-                  }
+                  disabled={!endYearOptions.length}
                   aria-label="End year"
                   style={{ width: '68px', minWidth: 0 }}
                 >
@@ -1245,17 +1359,37 @@ export function TimeSeriesChart({
           <p className="notice">Loading {metric}…</p>
         )}
 
-        {!loadingMetric && visibleGroups.length > 0 && monthList.length > 0 && (
+        {!loadingMetric && monthList.length > 0 && (
           <div className="series-window__body">
-            <div className="series-window__chart-wrap">
+            <div
+              className="series-window__chart-wrap"
+              style={{ position: 'relative' }}
+            >
               <div
                 ref={chartHostRef}
                 className="series-window__chart"
                 role="img"
-                aria-label="Monthly time series chart. Move the pointer over the chart to inspect monthly values."
+                aria-label={
+                  timeMode === 'forecast'
+                    ? 'Forecast chart. Move the pointer over the chart to inspect predicted monthly values.'
+                    : 'Historical time series chart. Move the pointer over the chart to inspect monthly values.'
+                }
               />
 
-              {hoveredMonth && (
+              {isForecasting && (
+                <div
+                  className="firescope-forecast-loading"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div className="firescope-forecast-spinner" />
+                  <div className="firescope-forecast-loading-text">
+                    Generating forecast…
+                  </div>
+                </div>
+              )}
+
+              {hoveredMonth && !isForecasting && (
                 <div
                   className="series-chart-tooltip"
                   style={{ left: `${tooltipLeft}%` }}
@@ -1290,6 +1424,28 @@ export function TimeSeriesChart({
                           </strong>
                         </div>
                       ))}
+
+                      {timeMode === 'forecast' &&
+                        forecastMetadata &&
+                        (forecastMetadata.lowerBound !== null ||
+                          forecastMetadata.upperBound !== null) && (
+                          <div className="series-chart-tooltip__interval">
+                            <div>
+                              Lower bound:{' '}
+                              {formatValue(
+                                forecastMetadata.lowerBound,
+                                metric,
+                              )}
+                            </div>
+                            <div>
+                              Upper bound:{' '}
+                              {formatValue(
+                                forecastMetadata.upperBound,
+                                metric,
+                              )}
+                            </div>
+                          </div>
+                        )}
                     </div>
                   ) : (
                     <div className="series-chart-tooltip__empty">
@@ -1311,11 +1467,24 @@ export function TimeSeriesChart({
           )}
 
         {!loadingMetric &&
-          visibleGroups.length === 0 &&
-          !(timeMode === 'forecast' && !forecastEndMonth) && (
+          timeMode === 'forecast' &&
+          forecastEndMonth &&
+          !forecastPoints.length &&
+          !isForecasting &&
+          !forecastRequestError && (
             <div className="series-window__empty-chart">
-              No data sources selected. Enable a source in the legend to
-              display its series.
+              No forecast available yet. Press GO to generate a forecast.
+            </div>
+          )}
+
+        {!loadingMetric &&
+          visibleGroups.length === 0 &&
+          !(timeMode === 'forecast' && !forecastEndMonth) &&
+          !(timeMode === 'forecast' && isForecasting) && (
+            <div className="series-window__empty-chart">
+              {timeMode === 'forecast'
+                ? 'No forecast points available for the selected period.'
+                : 'No data sources selected. Enable a source in the legend to display its series.'}
             </div>
           )}
 
@@ -1353,7 +1522,9 @@ export function TimeSeriesChart({
           <div className="series-sidebar__title">Monthly values</div>
 
           <div className="series-sidebar__subtitle">
-            {metric === 'frp' ? 'Fire Radiative Power (MW)' : 'Detections'}
+            {metric === 'frp'
+              ? 'Fire Radiative Power (MW)'
+              : 'Detections'}
           </div>
         </header>
 
@@ -1399,7 +1570,9 @@ export function TimeSeriesChart({
 
           {calendarEntries.length === 0 && (
             <div className="series-sidebar__empty-list">
-              No measurements for the selected sources and date range.
+              {timeMode === 'forecast'
+                ? 'No forecast values for the selected date range.'
+                : 'No measurements for the selected sources and date range.'}
             </div>
           )}
         </div>

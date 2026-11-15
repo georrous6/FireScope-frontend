@@ -50,3 +50,17 @@ export const fetchHarmonizedCellSeries = (lat, lon, metric, signal) => {
   const endpoint = metric === 'frp' ? '/detections/harmonized/cell/frp' : '/detections/harmonized/cell/detections';
   return getJson(endpoint, { lat, lon }, signal);
 };
+
+/** Forecast monthly activity for a specific harmonized grid cell. */
+export const fetchHarmonizedCellForecast = (
+  lat,
+  lon,
+  metric,
+  horizon,
+  signal,
+) =>
+  getJson(
+    '/detections/harmonized/cell/forecast',
+    { lat, lon, metric, horizon },
+    signal,
+  );
