@@ -89,8 +89,10 @@ export function FireMap() {
   const [playing, setPlaying] = useState(false);
   const [selected, setSelected] = useState(null);
   const [selectionMode, setSelectionMode] = useState('pan');
-  const [cursor, setCursor] = useState('');
   const [chartOpenError, setChartOpenError] = useState(null);
+
+  // Coordinates displayed while hovering in Select point mode.
+  const [hoverCoordinates, setHoverCoordinates] = useState(null);
 
   const sensor = SENSOR_OPTIONS.find((s) => s.key === sensorKey);
   const minYear = meta.minYear ?? FALLBACK_MIN_YEAR;
@@ -113,8 +115,10 @@ export function FireMap() {
   }, []);
 
   useEffect(() => {
-    if (selectionMode === 'pan') return;
-    setSelected(null);
+    if (selectionMode === 'pan') {
+      setSelected(null);
+      setHoverCoordinates(null);
+    }
   }, [selectionMode]);
 
   // ---- On start: which years exist, and totals for the stats panel ----
@@ -263,6 +267,22 @@ export function FireMap() {
     });
   };
 
+  // Update the fixed coordinate readout while hovering over the map.
+  const handleMapMouseMove = (e) => {
+    if (selectionMode !== 'select') return;
+
+    const { lat, lng } = e.lngLat;
+
+    setHoverCoordinates({
+      latitude: lat,
+      longitude: lng,
+    });
+  };
+
+  const handleMapMouseLeave = () => {
+    setHoverCoordinates(null);
+  };
+
   // Open the monthly time-series chart in a separate browser tab.
   const handlePointSelect = (e) => {
     const { lat, lng } = e.lngLat;
@@ -300,6 +320,22 @@ export function FireMap() {
   const errorForYear = yearError?.year === year ? yearError.message : null;
   const displayYear = year ?? maxYear;
 
+  // Shared styling for the Pan / Select buttons.
+  const modeButtonStyle = {
+    width: '32px',
+    height: '32px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 0,
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '11px',
+    fontWeight: 600,
+    color: '#333',
+    background: '#fff',
+  };
+
   return (
     <div className="fire-map">
       <MapGL
@@ -307,13 +343,13 @@ export function FireMap() {
         style={{ width: '100%', height: '100%' }}
         mapStyle={MAP_STYLE}
         interactiveLayerIds={selectionMode === 'pan' ? ['fire-layer'] : []}
-        cursor={selectionMode === 'select' ? 'crosshair' : cursor}
+        cursor={selectionMode === 'select' ? 'crosshair' : ''}
         dragPan={selectionMode === 'pan'}
         onClick={selectionMode === 'select' ? handlePointSelect : handleFireClick}
-        onMouseEnter={() => setCursor('pointer')}
-        onMouseLeave={() => setCursor('')}
+        onMouseMove={handleMapMouseMove}
+        onMouseLeave={handleMapMouseLeave}
       >
-        <NavigationControl position="top-right" />
+        <NavigationControl position="top-right" showCompass={false} />
 
         {shown && (
           <Source id="fires" type="geojson" data={shown.geojson}>
@@ -377,17 +413,43 @@ export function FireMap() {
         )}
       </MapGL>
 
-      {/* ---------- Top-right: map interaction mode ---------- */}
-      <div className="map-toolbar map-toolbar--top-right" aria-label="Map tools">
+      {/* ---------- Top-right: map controls ---------- */}
+      <div
+        className="map-toolbar map-toolbar--top-right"
+        aria-label="Map tools"
+        style={{
+          position: 'absolute',
+          top: '10px',
+          right: '10px',
+          zIndex: 2,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: '8px',
+        }}
+      >
+        {/* Pan / Select buttons, styled like the zoom controls. */}
         <div
-          className="segmented map-mode"
           role="group"
           aria-label="Map interaction mode"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            borderRadius: '4px',
+            boxShadow: '0 0 0 2px rgba(0, 0, 0, 0.1)',
+          }}
         >
           <button
             type="button"
-            className={selectionMode === 'pan' ? 'is-active' : ''}
+            style={{
+              ...modeButtonStyle,
+              color: selectionMode === 'pan' ? '#111' : '#555',
+              background: selectionMode === 'pan' ? '#e6e6e6' : '#fff',
+              borderBottom: '1px solid #ddd',
+            }}
             aria-pressed={selectionMode === 'pan'}
+            title="Pan map"
             onClick={() => setSelectionMode('pan')}
           >
             Pan
@@ -395,16 +457,61 @@ export function FireMap() {
 
           <button
             type="button"
-            className={selectionMode === 'select' ? 'is-active' : ''}
+            style={{
+              ...modeButtonStyle,
+              color: selectionMode === 'select' ? '#111' : '#555',
+              background: selectionMode === 'select' ? '#e6e6e6' : '#fff',
+            }}
             aria-pressed={selectionMode === 'select'}
+            title="Select point"
             onClick={() => {
               setChartOpenError(null);
+              setHoverCoordinates(null);
               setSelectionMode('select');
             }}
           >
-            Select point
+            Select
           </button>
         </div>
+
+        {/* Fixed coordinate display below the interaction buttons. */}
+        {selectionMode === 'select' && (
+          <div
+            className="map-coordinate-readout"
+            aria-live="polite"
+            style={{
+              width: '180px',
+              boxSizing: 'border-box',
+              padding: '9px 12px',
+              borderRadius: '6px',
+              background: 'rgba(20, 25, 32, 0.92)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              color: '#fdf6e3',
+              fontSize: '12px',
+              lineHeight: 1.6,
+              boxShadow: '0 3px 12px rgba(0, 0, 0, 0.25)',
+              pointerEvents: 'none',
+            }}
+          >
+            {hoverCoordinates ? (
+              <>
+                <div>
+                  <span style={{ opacity: 0.65 }}>Latitude </span>
+                  <strong>{hoverCoordinates.latitude.toFixed(5)}°</strong>
+                </div>
+
+                <div>
+                  <span style={{ opacity: 0.65 }}>Longitude </span>
+                  <strong>{hoverCoordinates.longitude.toFixed(5)}°</strong>
+                </div>
+              </>
+            ) : (
+              <span style={{ opacity: 0.7 }}>
+                Move over the map to inspect coordinates.
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ---------- Top-left: sensor filter + live metrics ---------- */}
