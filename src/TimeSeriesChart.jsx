@@ -161,8 +161,8 @@ export function TimeSeriesChart({
   const [range, setRange] = useState(defaultRange);
   const [visibleSources, setVisibleSources] = useState({});
   const [panelSize, setPanelSize] = useState({
-    width: 560,
-    height: 360,
+    width: 640,
+    height: 430,
   });
   const [hoveredMonthIndex, setHoveredMonthIndex] = useState(null);
   const [tooltipLeft, setTooltipLeft] = useState(50);
@@ -324,7 +324,7 @@ export function TimeSeriesChart({
 
     const getChartSize = () => ({
       width: Math.max(280, Math.floor(host.clientWidth)),
-      height: Math.max(150, Math.floor(host.clientHeight)),
+      height: Math.max(180, Math.floor(host.clientHeight)),
     });
 
     const initialSize = getChartSize();
@@ -444,8 +444,7 @@ export function TimeSeriesChart({
               return;
             }
 
-            // uPlot cursor.left is plot-relative.
-            // posToIdx(..., false) returns the closest data index.
+            // Convert the cursor position to the closest data index.
             const index = u.posToIdx(cursorLeft, false);
 
             if (
@@ -458,7 +457,7 @@ export function TimeSeriesChart({
               return;
             }
 
-            // Calculate the exact plot-relative position of this month.
+            // Get the exact position of the selected month.
             const snappedLeft = u.valToPos(index, 'x', false);
 
             if (!Number.isFinite(snappedLeft)) {
@@ -466,11 +465,12 @@ export function TimeSeriesChart({
               return;
             }
 
-            // Update React state immediately, even when the cursor
-            // still needs to be snapped.
-            setHoveredMonthIndex(index);
+            // Update tooltip content for the selected month.
+            setHoveredMonthIndex((current) =>
+              current === index ? current : index,
+            );
 
-            // Position the tooltip relative to the plot area.
+            // Position the tooltip relative to the chart plot area.
             const plotWidth = Math.max(u.bbox.width, 1);
             const percentage = (snappedLeft / plotWidth) * 100;
 
