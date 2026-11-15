@@ -19,7 +19,7 @@ const MONTH_SELECT_OPTIONS = [
   { value: '02', label: 'Feb' },
   { value: '03', label: 'Mar' },
   { value: '04', label: 'Apr' },
-  { value: '05', label: 'May' },
+  { value: '05', label: 'Jun' },
   { value: '06', label: 'Jun' },
   { value: '07', label: 'Jul' },
   { value: '08', label: 'Aug' },
@@ -143,6 +143,9 @@ const getPointValueMap = (group) =>
     ]),
   );
 
+/*
+ * Maps each forecast month to its lower and upper prediction bounds.
+ */
 const getForecastMetadataMap = (points) =>
   new Map(
     points
@@ -153,12 +156,17 @@ const getForecastMetadataMap = (points) =>
       .map((point) => [
         monthKey(point.month),
         {
-          lowerBound: Number.isFinite(Number(point.lower_bound))
-            ? Number(point.lower_bound)
-            : null,
-          upperBound: Number.isFinite(Number(point.upper_bound))
-            ? Number(point.upper_bound)
-            : null,
+          lowerBound:
+            point.lower_bound == null ||
+            !Number.isFinite(Number(point.lower_bound))
+              ? null
+              : Number(point.lower_bound),
+
+          upperBound:
+            point.upper_bound == null ||
+            !Number.isFinite(Number(point.upper_bound))
+              ? null
+              : Number(point.upper_bound),
         },
       ]),
   );
@@ -237,12 +245,6 @@ export function TimeSeriesChart({
 
   const rawPoints = Array.isArray(series?.points) ? series.points : [];
 
-  /*
-   * Keep historical and forecast observations separate.
-   *
-   * Forecast points must never affect the historical month range
-   * or the automatically determined forecast starting month.
-   */
   const historicalPoints = useMemo(
     () =>
       rawPoints.filter(
@@ -288,10 +290,6 @@ export function TimeSeriesChart({
     [monthsByYear],
   );
 
-  /*
-   * Determine the first calendar month without a valid historical
-   * observation for the selected metric.
-   */
   const forecastStartMonth = useMemo(() => {
     if (!monthOptions.length) return null;
 
@@ -320,9 +318,7 @@ export function TimeSeriesChart({
       (month) => !observedMonths.has(month),
     );
 
-    if (firstMissingMonth) {
-      return firstMissingMonth;
-    }
+    if (firstMissingMonth) return firstMissingMonth;
 
     return shiftMonth(monthOptions.at(-1), 1);
   }, [historicalPoints, monthOptions, metricKey]);
@@ -362,7 +358,6 @@ export function TimeSeriesChart({
   const chartInstanceRef = useRef(null);
   const previousForecastStartRef = useRef(forecastStartMonth);
 
-  // Keep the historical month range valid when new data arrives.
   useEffect(() => {
     if (!monthOptions.length) return;
 
@@ -381,7 +376,6 @@ export function TimeSeriesChart({
     });
   }, [defaultRange, monthOptions]);
 
-  // Reset the forecast selection when its starting month changes.
   useEffect(() => {
     if (previousForecastStartRef.current !== forecastStartMonth) {
       setForecastEndMonth(null);
@@ -391,7 +385,6 @@ export function TimeSeriesChart({
     }
   }, [forecastStartMonth]);
 
-  // Initialize visibility for newly available sources.
   useEffect(() => {
     const sources = Array.from(
       new Set(
@@ -416,9 +409,6 @@ export function TimeSeriesChart({
     });
   }, [historicalPoints, forecastPoints]);
 
-  /*
-   * Select the date range for the current mode.
-   */
   const effectiveRange = useMemo(() => {
     if (timeMode === 'forecast') {
       return {
@@ -431,13 +421,8 @@ export function TimeSeriesChart({
   }, [timeMode, forecastStartMonth, forecastEndMonth, range]);
 
   /*
-   * This is the key separation:
-   *
-   * History mode  -> historical points only.
-   * Forecast mode -> forecast points only.
-   *
-   * Historical and forecasted observations are never plotted
-   * together.
+   * History mode displays historical data only.
+   * Forecast mode displays forecast data only.
    */
   const displayedSeries = useMemo(() => {
     if (timeMode === 'forecast') {
@@ -512,10 +497,6 @@ export function TimeSeriesChart({
           ({ value }) => value !== undefined && Number.isFinite(value),
         )
     : [];
-
-  const forecastMetadata = hoveredMonth
-    ? forecastMetadataMap.get(monthKey(hoveredMonth))
-    : null;
 
   const startSelection = useMemo(() => {
     if (timeMode === 'forecast') {
@@ -605,10 +586,6 @@ export function TimeSeriesChart({
       !isForecasting,
   );
 
-  /*
-   * Build sidebar entries from exactly the same groups and month
-   * range used to construct the chart.
-   */
   const calendarEntries = useMemo(() => {
     const allValues = [];
 
@@ -646,6 +623,23 @@ export function TimeSeriesChart({
       }))
       .reverse();
   }, [monthList, visibleGroups, valueMaps]);
+
+  /*
+   * Build the forecast confidence band.
+   * The bounds are aligned to the same month indices as the chart.
+   */
+  const forecastBand = useMemo(() => {
+    if (timeMode !== 'forecast') return [];
+
+    return monthList.map((month) => {
+      const metadata = forecastMetadataMap.get(monthKey(month));
+
+      return {
+        lower: metadata?.lowerBound ?? null,
+        upper: metadata?.upperBound ?? null,
+      };
+    });
+  }, [timeMode, monthList, forecastMetadataMap]);
 
   /*
    * Create and manage the uPlot instance.
@@ -686,6 +680,25 @@ export function TimeSeriesChart({
 
     const initialSize = getChartSize();
 
+    /*
+     * Include the lower and upper bounds when determining the
+     * Y-axis range. Otherwise, the confidence band could be clipped.
+     */
+    const chartValues = chartData
+      .slice(1)
+      .flat()
+      .filter(Number.isFinite);
+
+    const boundValues = forecastBand
+      .flatMap(({ lower, upper }) => [lower, upper])
+      .filter(Number.isFinite);
+
+    const allYValues = [...chartValues, ...boundValues];
+
+    const dataMin = allYValues.length ? Math.min(...allYValues) : 0;
+    const dataMax = allYValues.length ? Math.max(...allYValues) : 1;
+    const yPadding = (dataMax - dataMin) * 0.08 || 1;
+
     const chartOptions = {
       width: initialSize.width,
       height: initialSize.height,
@@ -703,8 +716,13 @@ export function TimeSeriesChart({
             return [0, monthList.length - 1];
           },
         },
+
         y: {
-          auto: true,
+          auto: false,
+          range: () => [
+            dataMin - yPadding,
+            dataMax + yPadding,
+          ],
         },
       },
 
@@ -793,6 +811,124 @@ export function TimeSeriesChart({
       },
 
       hooks: {
+        /*
+         * Draw the shaded confidence band before the data series.
+         * This keeps the forecast line and points visible above it.
+         */
+        drawClear: [
+          (u) => {
+            if (timeMode !== 'forecast') return;
+
+            const ctx = u.ctx;
+            const bbox = u.bbox;
+
+            ctx.save();
+
+            ctx.beginPath();
+            ctx.rect(
+              bbox.left,
+              bbox.top,
+              bbox.width,
+              bbox.height,
+            );
+            ctx.clip();
+
+            let segment = [];
+
+            const drawSegment = () => {
+              if (segment.length < 2) {
+                segment = [];
+                return;
+              }
+
+              ctx.beginPath();
+
+              // Trace the upper boundary from left to right.
+              segment.forEach((point, index) => {
+                const x = u.valToPos(point.index, 'x', true);
+                const y = u.valToPos(point.upper, 'y', true);
+
+                if (index === 0) {
+                  ctx.moveTo(x, y);
+                } else {
+                  ctx.lineTo(x, y);
+                }
+              });
+
+              // Trace the lower boundary from right to left.
+              for (let index = segment.length - 1; index >= 0; index -= 1) {
+                const point = segment[index];
+                const x = u.valToPos(point.index, 'x', true);
+                const y = u.valToPos(point.lower, 'y', true);
+
+                ctx.lineTo(x, y);
+              }
+
+              ctx.closePath();
+
+              ctx.fillStyle = 'rgba(254, 178, 76, 0.20)';
+              ctx.fill();
+
+              // Subtle upper and lower boundary lines.
+              ctx.beginPath();
+
+              segment.forEach((point, index) => {
+                const x = u.valToPos(point.index, 'x', true);
+                const y = u.valToPos(point.upper, 'y', true);
+
+                if (index === 0) {
+                  ctx.moveTo(x, y);
+                } else {
+                  ctx.lineTo(x, y);
+                }
+              });
+
+              ctx.strokeStyle = 'rgba(254, 178, 76, 0.55)';
+              ctx.lineWidth = 1;
+              ctx.stroke();
+
+              ctx.beginPath();
+
+              segment.forEach((point, index) => {
+                const x = u.valToPos(point.index, 'x', true);
+                const y = u.valToPos(point.lower, 'y', true);
+
+                if (index === 0) {
+                  ctx.moveTo(x, y);
+                } else {
+                  ctx.lineTo(x, y);
+                }
+              });
+
+              ctx.strokeStyle = 'rgba(254, 178, 76, 0.55)';
+              ctx.lineWidth = 1;
+              ctx.stroke();
+
+              segment = [];
+            };
+
+            forecastBand.forEach(({ lower, upper }, index) => {
+              if (
+                !Number.isFinite(lower) ||
+                !Number.isFinite(upper)
+              ) {
+                drawSegment();
+                return;
+              }
+
+              segment.push({
+                index,
+                lower,
+                upper,
+              });
+            });
+
+            drawSegment();
+
+            ctx.restore();
+          },
+        ],
+
         setCursor: [
           (u) => {
             const cursorLeft = u.cursor.left;
@@ -872,6 +1008,7 @@ export function TimeSeriesChart({
     valueMaps,
     metric,
     timeMode,
+    forecastBand,
   ]);
 
   const handleSourceToggle = (source) => {
@@ -1371,7 +1508,7 @@ export function TimeSeriesChart({
                 role="img"
                 aria-label={
                   timeMode === 'forecast'
-                    ? 'Forecast chart. Move the pointer over the chart to inspect predicted monthly values.'
+                    ? 'Forecast chart with shaded prediction interval. Move the pointer over the chart to inspect predicted monthly values.'
                     : 'Historical time series chart. Move the pointer over the chart to inspect monthly values.'
                 }
               />
@@ -1424,28 +1561,6 @@ export function TimeSeriesChart({
                           </strong>
                         </div>
                       ))}
-
-                      {timeMode === 'forecast' &&
-                        forecastMetadata &&
-                        (forecastMetadata.lowerBound !== null ||
-                          forecastMetadata.upperBound !== null) && (
-                          <div className="series-chart-tooltip__interval">
-                            <div>
-                              Lower bound:{' '}
-                              {formatValue(
-                                forecastMetadata.lowerBound,
-                                metric,
-                              )}
-                            </div>
-                            <div>
-                              Upper bound:{' '}
-                              {formatValue(
-                                forecastMetadata.upperBound,
-                                metric,
-                              )}
-                            </div>
-                          </div>
-                        )}
                     </div>
                   ) : (
                     <div className="series-chart-tooltip__empty">
