@@ -1175,6 +1175,10 @@ button:focus-visible,
     padding: 6px;
   }
 
+  .series-window__forecast-button {
+    border-radius: 10px;
+  }
+
   .series-window__range-picker {
     gap: 4px;
   }
