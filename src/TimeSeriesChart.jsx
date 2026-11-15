@@ -19,7 +19,7 @@ const MONTH_SELECT_OPTIONS = [
   { value: '02', label: 'Feb' },
   { value: '03', label: 'Mar' },
   { value: '04', label: 'Apr' },
-  { value: '05', label: 'Jun' },
+  { value: '05', label: 'May' },
   { value: '06', label: 'Jun' },
   { value: '07', label: 'Jul' },
   { value: '08', label: 'Aug' },
@@ -497,6 +497,18 @@ export function TimeSeriesChart({
           ({ value }) => value !== undefined && Number.isFinite(value),
         )
     : [];
+
+  /*
+   * Confidence interval for the currently hovered forecast month.
+   */
+  const hoveredForecastMetadata =
+    timeMode === 'forecast' && hoveredMonth
+      ? forecastMetadataMap.get(monthKey(hoveredMonth))
+      : null;
+
+  const hasHoveredConfidenceInterval =
+    Number.isFinite(hoveredForecastMetadata?.lowerBound) &&
+    Number.isFinite(hoveredForecastMetadata?.upperBound);
 
   const startSelection = useMemo(() => {
     if (timeMode === 'forecast') {
@@ -1565,6 +1577,57 @@ export function TimeSeriesChart({
                   ) : (
                     <div className="series-chart-tooltip__empty">
                       No measurements for this month.
+                    </div>
+                  )}
+
+                  {hasHoveredConfidenceInterval && (
+                    <div
+                      className="series-chart-tooltip__confidence"
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '3px',
+                        marginTop: '7px',
+                        paddingTop: '6px',
+                        borderTop: '1px solid rgba(253, 246, 227, 0.12)',
+                        color: 'rgba(253, 246, 227, 0.58)',
+                        fontSize: '10px',
+                        fontWeight: 400,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          gap: '16px',
+                        }}
+                      >
+                        <span>Lower bound</span>
+                        <span>
+                          {formatValue(
+                            hoveredForecastMetadata.lowerBound,
+                            metric,
+                          )}
+                          {metric === 'frp' ? ' MW' : ''}
+                        </span>
+                      </div>
+
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          gap: '16px',
+                        }}
+                      >
+                        <span>Upper bound</span>
+                        <span>
+                          {formatValue(
+                            hoveredForecastMetadata.upperBound,
+                            metric,
+                          )}
+                          {metric === 'frp' ? ' MW' : ''}
+                        </span>
+                      </div>
                     </div>
                   )}
                 </div>
