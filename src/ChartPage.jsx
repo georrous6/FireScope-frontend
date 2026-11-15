@@ -82,9 +82,9 @@ export function ChartPage() {
     );
   }
 
-  return (
-    <main className="chart-page">
-      {loadingMetric && (
+  if (loadingMetric) {
+    return (
+      <main className="chart-page">
         <section className="chart-page__message" aria-live="polite">
           <h1>Loading monthly series</h1>
           <p>
@@ -92,9 +92,13 @@ export function ChartPage() {
             {formatCoordinate(lon)}…
           </p>
         </section>
-      )}
+      </main>
+    );
+  }
 
-      {error && (
+  if (error) {
+    return (
+      <main className="chart-page">
         <section className="chart-page__message" role="alert">
           <h1>Could not load monthly series</h1>
           <p>{error}</p>
@@ -112,20 +116,22 @@ export function ChartPage() {
             </button>
           </div>
         </section>
-      )}
+      </main>
+    );
+  }
 
-      {!loadingMetric && !error && series && (
-        <TimeSeriesChart
-          metric={metric}
-          series={series}
-          onMetricChange={setMetric}
-          loadingMetric={loadingMetric}
-          error={error}
-          title="Monthly series"
-          subtitle={`${formatCoordinate(lat)}, ${formatCoordinate(lon)}`}
-          onClose={handleClose}
-        />
-      )}
+  return (
+    <main className="chart-page">
+      <TimeSeriesChart
+        metric={metric}
+        series={series}
+        onMetricChange={setMetric}
+        loadingMetric={loadingMetric}
+        error={error}
+        title="Monthly series"
+        subtitle={`${formatCoordinate(lat)}, ${formatCoordinate(lon)}`}
+        onClose={handleClose}
+      />
     </main>
   );
 }

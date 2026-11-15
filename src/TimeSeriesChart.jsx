@@ -30,6 +30,13 @@ const MONTH_LABEL_BY_VALUE = new Map(
   MONTH_SELECT_OPTIONS.map((option) => [option.value, option.label]),
 );
 
+const COLOR_STOPS = [
+  { position: 0, color: '#fdf6e3' },
+  { position: 0.33, color: '#ffeda0' },
+  { position: 0.66, color: '#feb24c' },
+  { position: 1, color: '#f03b20' },
+];
+
 const parseMonthParts = (value) => {
   const key = monthKey(value);
   const match = key.match(/^(\d{4})-(\d{2})$/);
@@ -110,6 +117,56 @@ const formatAxisValue = (value, metric) => {
   }).format(value);
 };
 
+const hexToRgb = (hex) => ({
+  r: Number.parseInt(hex.slice(1, 3), 16),
+  g: Number.parseInt(hex.slice(3, 5), 16),
+  b: Number.parseInt(hex.slice(5, 7), 16),
+});
+
+const rgbToHex = ({ r, g, b }) =>
+  `#${[r, g, b]
+    .map((value) =>
+      Math.round(value).toString(16).padStart(2, '0'),
+    )
+    .join('')}`;
+
+const interpolateColor = (start, end, amount) => {
+  const a = hexToRgb(start);
+  const b = hexToRgb(end);
+
+  return rgbToHex({
+    r: a.r + (b.r - a.r) * amount,
+    g: a.g + (b.g - a.g) * amount,
+    b: a.b + (b.b - a.b) * amount,
+  });
+};
+
+const getMetricColor = (value, min, max) => {
+  if (!Number.isFinite(value)) return 'transparent';
+
+  // When all displayed values are equal, use the middle of the scale.
+  const normalized =
+    max === min ? 0.5 : Math.max(0, Math.min(1, (value - min) / (max - min)));
+
+  for (let index = 0; index < COLOR_STOPS.length - 1; index += 1) {
+    const current = COLOR_STOPS[index];
+    const next = COLOR_STOPS[index + 1];
+
+    if (
+      normalized >= current.position &&
+      normalized <= next.position
+    ) {
+      const amount =
+        (normalized - current.position) /
+        (next.position - current.position);
+
+      return interpolateColor(current.color, next.color, amount);
+    }
+  }
+
+  return COLOR_STOPS.at(-1).color;
+};
+
 export function TimeSeriesChart({
   metric,
   series,
@@ -161,24 +218,8 @@ export function TimeSeriesChart({
   const [range, setRange] = useState(defaultRange);
   const [visibleSources, setVisibleSources] = useState({});
 
-  const [panelSize, setPanelSize] = useState({
-    width: 640,
-    height: 430,
-  });
-
-  // Position of the floating chart relative to its original location.
-  const [panelPosition, setPanelPosition] = useState({
-    x: 0,
-    y: 0,
-  });
-
-  const [isDragging, setIsDragging] = useState(false);
-
   const [hoveredMonthIndex, setHoveredMonthIndex] = useState(null);
   const [tooltipLeft, setTooltipLeft] = useState(50);
-
-  const resizeRef = useRef(null);
-  const dragRef = useRef(null);
 
   const chartHostRef = useRef(null);
   const chartInstanceRef = useRef(null);
@@ -303,6 +344,44 @@ export function TimeSeriesChart({
 
   const startMonthOptions = monthsByYear.get(startSelection.year) ?? [];
   const endMonthOptions = monthsByYear.get(endSelection.year) ?? [];
+
+  /*
+   * Build the sidebar entries from exactly the same visible groups
+   * and month range used to construct the chart.
+   */
+  const calendarEntries = useMemo(() => {
+    const allValues = [];
+
+    for (const month of monthList) {
+      for (const group of visibleGroups) {
+        const value = valueMaps.get(group.source)?.get(monthKey(month));
+
+        if (Number.isFinite(value)) {
+          allValues.push(value);
+        }
+      }
+    }
+
+    const min = allValues.length ? Math.min(...allValues) : 0;
+    const max = allValues.length ? Math.max(...allValues) : 0;
+
+    return [...monthList].reverse().map((month) => ({
+      month,
+      values: visibleGroups
+        .map((group) => {
+          const value = valueMaps.get(group.source)?.get(monthKey(month));
+
+          if (!Number.isFinite(value)) return null;
+
+          return {
+            source: group.source,
+            value,
+            color: getMetricColor(value, min, max),
+          };
+        })
+        .filter(Boolean),
+    }));
+  }, [monthList, visibleGroups, valueMaps]);
 
   // Create and manage the uPlot instance.
   useEffect(() => {
@@ -456,7 +535,6 @@ export function TimeSeriesChart({
               return;
             }
 
-            // Convert the cursor position to the closest data index.
             const index = u.posToIdx(cursorLeft, false);
 
             if (
@@ -469,7 +547,6 @@ export function TimeSeriesChart({
               return;
             }
 
-            // Get the exact position of the selected month.
             const snappedLeft = u.valToPos(index, 'x', false);
 
             if (!Number.isFinite(snappedLeft)) {
@@ -477,12 +554,10 @@ export function TimeSeriesChart({
               return;
             }
 
-            // Update tooltip content for the selected month.
             setHoveredMonthIndex((current) =>
               current === index ? current : index,
             );
 
-            // Position the tooltip relative to the chart plot area.
             const plotWidth = Math.max(u.bbox.width, 1);
             const percentage = (snappedLeft / plotWidth) * 100;
 
@@ -490,7 +565,6 @@ export function TimeSeriesChart({
               Math.max(5, Math.min(95, percentage)),
             );
 
-            // Snap the vertical cursor to the selected data point.
             if (Math.abs(cursorLeft - snappedLeft) > 0.5) {
               u.setCursor(
                 {
@@ -525,83 +599,6 @@ export function TimeSeriesChart({
       }
     };
   }, [loadingMetric, visibleGroups, monthList, valueMaps, metric]);
-
-  // Handle dragging and resizing of the floating chart window.
-  useEffect(() => {
-    const handlePointerMove = (event) => {
-      // Move the chart window.
-      if (dragRef.current) {
-        const {
-          startX,
-          startY,
-          initialX,
-          initialY,
-        } = dragRef.current;
-
-        setPanelPosition({
-          x: initialX + (event.clientX - startX),
-          y: initialY + (event.clientY - startY),
-        });
-
-        return;
-      }
-
-      // Resize the chart window.
-      if (resizeRef.current) {
-        const {
-          startX,
-          startY,
-          startWidth,
-          startHeight,
-        } = resizeRef.current;
-
-        setPanelSize({
-          width: Math.max(
-            360,
-            startWidth + (event.clientX - startX),
-          ),
-          height: Math.max(
-            300,
-            startHeight + (event.clientY - startY),
-          ),
-        });
-      }
-    };
-
-    const handlePointerUp = () => {
-      resizeRef.current = null;
-      dragRef.current = null;
-      setIsDragging(false);
-    };
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-    };
-  }, []);
-
-  // Start dragging when the chart header is pressed.
-  const handleHeaderPointerDown = (event) => {
-    // Do not start dragging when the close button is clicked.
-    if (event.target.closest('button')) return;
-
-    // Only respond to the primary mouse button.
-    if (event.button !== 0) return;
-
-    dragRef.current = {
-      startX: event.clientX,
-      startY: event.clientY,
-      initialX: panelPosition.x,
-      initialY: panelPosition.y,
-    };
-
-    setIsDragging(true);
-
-    event.preventDefault();
-  };
 
   const handleSourceToggle = (source) => {
     setVisibleSources((current) => ({
@@ -656,7 +653,7 @@ export function TimeSeriesChart({
 
   if (!hasSeries) {
     return (
-      <div className="series-window series-window--empty">
+      <section className="series-window series-window--empty">
         <div className="series-window__header">
           <div>
             <div className="series-window__title">{title}</div>
@@ -680,278 +677,307 @@ export function TimeSeriesChart({
         <p className="notice">
           No monthly series available for this location.
         </p>
-      </div>
+      </section>
     );
   }
 
   return (
-    <div
-      className="series-window"
-      style={{
-        width: `${panelSize.width}px`,
-        height: `${panelSize.height}px`,
-        transform: `translate3d(${panelPosition.x}px, ${panelPosition.y}px, 0)`,
-      }}
-    >
-      <div
-        className="series-window__header"
-        onPointerDown={handleHeaderPointerDown}
-        style={{
-          cursor: isDragging ? 'grabbing' : 'grab',
-          userSelect: 'none',
-          touchAction: 'none',
-        }}
-      >
-        <div>
-          <div className="series-window__title">{title}</div>
-          {subtitle && (
-            <div className="series-window__subtitle">{subtitle}</div>
+    <section className="series-window series-window--fullscreen">
+      <div className="series-window__main">
+        <div className="series-window__header">
+          <div>
+            <div className="series-window__title">{title}</div>
+            {subtitle && (
+              <div className="series-window__subtitle">{subtitle}</div>
+            )}
+          </div>
+
+          {onClose && (
+            <button
+              type="button"
+              className="series-window__close"
+              onClick={onClose}
+              aria-label="Close chart"
+            >
+              ×
+            </button>
           )}
         </div>
 
-        {onClose && (
-          <button
-            type="button"
-            className="series-window__close"
-            onClick={onClose}
-            aria-label="Close chart"
-            style={{
-              cursor: 'pointer',
-              touchAction: 'auto',
-            }}
+        <div className="series-window__toolbar">
+          <div
+            className="segmented point-series-toggle"
+            role="group"
+            aria-label="Monthly series metric"
           >
-            ×
-          </button>
+            <button
+              type="button"
+              className={metric === 'detections' ? 'is-active' : ''}
+              aria-pressed={metric === 'detections'}
+              onClick={() => {
+                onMetricChange?.('detections');
+                setHoveredMonthIndex(null);
+              }}
+            >
+              Detections
+            </button>
+
+            <button
+              type="button"
+              className={metric === 'frp' ? 'is-active' : ''}
+              aria-pressed={metric === 'frp'}
+              onClick={() => {
+                onMetricChange?.('frp');
+                setHoveredMonthIndex(null);
+              }}
+            >
+              FRP
+            </button>
+          </div>
+
+          <div
+            className="series-window__range"
+            aria-label="Month range selector"
+          >
+            <div className="series-window__range-group">
+              <span>Start</span>
+
+              <div className="series-window__range-picker">
+                <select
+                  value={startSelection.month}
+                  onChange={(event) =>
+                    handleMonthPartChange('start', event.target.value)
+                  }
+                  disabled={!startMonthOptions.length}
+                  aria-label="Start month"
+                >
+                  {startMonthOptions.map((month) => (
+                    <option key={month} value={month}>
+                      {MONTH_LABEL_BY_VALUE.get(month) ?? month}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={startSelection.year}
+                  onChange={(event) =>
+                    handleYearPartChange('start', event.target.value)
+                  }
+                  disabled={!yearOptions.length}
+                  aria-label="Start year"
+                >
+                  {yearOptions.map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="series-window__range-group">
+              <span>End</span>
+
+              <div className="series-window__range-picker">
+                <select
+                  value={endSelection.month}
+                  onChange={(event) =>
+                    handleMonthPartChange('end', event.target.value)
+                  }
+                  disabled={!endMonthOptions.length}
+                  aria-label="End month"
+                >
+                  {endMonthOptions.map((month) => (
+                    <option key={month} value={month}>
+                      {MONTH_LABEL_BY_VALUE.get(month) ?? month}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={endSelection.year}
+                  onChange={(event) =>
+                    handleYearPartChange('end', event.target.value)
+                  }
+                  disabled={!endMonthOptions.length}
+                  aria-label="End year"
+                >
+                  {yearOptions.map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <p className="notice notice-error">
+            Could not load {metric}: {error}
+          </p>
+        )}
+
+        {loadingMetric && (
+          <p className="notice">Loading {metric}…</p>
+        )}
+
+        {!loadingMetric && visibleGroups.length > 0 && monthList.length > 0 && (
+          <div className="series-window__body">
+            <div className="series-window__chart-wrap">
+              <div
+                ref={chartHostRef}
+                className="series-window__chart"
+                role="img"
+                aria-label="Monthly time series chart. Move the pointer over the chart to inspect monthly values."
+              />
+
+              {hoveredMonth && (
+                <div
+                  className="series-chart-tooltip"
+                  style={{ left: `${tooltipLeft}%` }}
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div className="series-chart-tooltip__month">
+                    {fmtMonthLabel(hoveredMonth)}
+                  </div>
+
+                  <div className="series-chart-tooltip__metric">
+                    {metric === 'frp'
+                      ? 'Fire Radiative Power'
+                      : 'Detections'}
+                  </div>
+
+                  {tooltipValues.length > 0 ? (
+                    <div className="series-chart-tooltip__values">
+                      {tooltipValues.map(({ source, color, value }) => (
+                        <div
+                          className="series-chart-tooltip__row"
+                          key={source}
+                        >
+                          <span className="series-chart-tooltip__source">
+                            <i style={{ background: color }} />
+                            {source}
+                          </span>
+
+                          <strong>
+                            {formatValue(value, metric)}
+                            {metric === 'frp' ? ' MW' : ''}
+                          </strong>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="series-chart-tooltip__empty">
+                      No measurements for this month.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {!loadingMetric && visibleGroups.length === 0 && (
+          <div className="series-window__empty-chart">
+            No data sources selected. Enable a source in the legend to
+            display its series.
+          </div>
+        )}
+
+        {!loadingMetric && (
+          <div
+            className="series-window__legend"
+            aria-label="Data source legend"
+          >
+            {groups.map((group) => (
+              <label
+                key={group.source}
+                className="series-window__legend-item"
+              >
+                <input
+                  type="checkbox"
+                  checked={visibleSources[group.source] !== false}
+                  onChange={() => handleSourceToggle(group.source)}
+                />
+
+                <span
+                  className="series-swatch"
+                  style={{ background: group.color }}
+                  aria-hidden="true"
+                />
+
+                <span>{group.source}</span>
+              </label>
+            ))}
+          </div>
         )}
       </div>
 
-      <div className="series-window__toolbar">
-        <div
-          className="segmented point-series-toggle"
-          role="group"
-          aria-label="Monthly series metric"
-        >
-          <button
-            type="button"
-            className={metric === 'detections' ? 'is-active' : ''}
-            aria-pressed={metric === 'detections'}
-            onClick={() => {
-              onMetricChange?.('detections');
-              setHoveredMonthIndex(null);
-            }}
-          >
-            Detections
-          </button>
+      <aside className="series-sidebar">
+        <header className="series-sidebar__header">
+          <div className="series-sidebar__title">Monthly values</div>
 
-          <button
-            type="button"
-            className={metric === 'frp' ? 'is-active' : ''}
-            aria-pressed={metric === 'frp'}
-            onClick={() => {
-              onMetricChange?.('frp');
-              setHoveredMonthIndex(null);
-            }}
-          >
-            FRP
-          </button>
-        </div>
-
-        <div
-          className="series-window__range"
-          aria-label="Month range selector"
-        >
-          <div className="series-window__range-group">
-            <span>Start</span>
-
-            <div className="series-window__range-picker">
-              <select
-                value={startSelection.month}
-                onChange={(event) =>
-                  handleMonthPartChange('start', event.target.value)
-                }
-                disabled={!startMonthOptions.length}
-                aria-label="Start month"
-              >
-                {startMonthOptions.map((month) => (
-                  <option key={month} value={month}>
-                    {MONTH_LABEL_BY_VALUE.get(month) ?? month}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={startSelection.year}
-                onChange={(event) =>
-                  handleYearPartChange('start', event.target.value)
-                }
-                disabled={!yearOptions.length}
-                aria-label="Start year"
-              >
-                {yearOptions.map((year) => (
-                  <option key={year} value={year}>
-                    {year}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div className="series-sidebar__subtitle">
+            {metric === 'frp' ? 'Fire Radiative Power (MW)' : 'Detections'}
           </div>
+        </header>
 
-          <div className="series-window__range-group">
-            <span>End</span>
+        <div className="series-sidebar__scale">
+          <span>Lowest</span>
 
-            <div className="series-window__range-picker">
-              <select
-                value={endSelection.month}
-                onChange={(event) =>
-                  handleMonthPartChange('end', event.target.value)
-                }
-                disabled={!endMonthOptions.length}
-                aria-label="End month"
-              >
-                {endMonthOptions.map((month) => (
-                  <option key={month} value={month}>
-                    {MONTH_LABEL_BY_VALUE.get(month) ?? month}
-                  </option>
-                ))}
-              </select>
+          <div className="series-sidebar__scale-bar" />
 
-              <select
-                value={endSelection.year}
-                onChange={(event) =>
-                  handleYearPartChange('end', event.target.value)
-                }
-                disabled={!yearOptions.length}
-                aria-label="End year"
-              >
-                {yearOptions.map((year) => (
-                  <option key={year} value={year}>
-                    {year}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
+          <span>Highest</span>
         </div>
-      </div>
 
-      {error && (
-        <p className="notice notice-error">
-          Could not load {metric}: {error}
-        </p>
-      )}
-
-      {loadingMetric && (
-        <p className="notice">Loading {metric}…</p>
-      )}
-
-      {!loadingMetric && visibleGroups.length > 0 && monthList.length > 0 && (
-        <div className="series-window__body">
-          <div className="series-window__chart-wrap">
-            <div
-              ref={chartHostRef}
-              className="series-window__chart"
-              role="img"
-              aria-label="Monthly time series chart. Move the pointer over the chart to inspect monthly values."
-            />
-
-            {hoveredMonth && (
-              <div
-                className="series-chart-tooltip"
-                style={{ left: `${tooltipLeft}%` }}
-                role="status"
-                aria-live="polite"
-              >
-                <div className="series-chart-tooltip__month">
-                  {fmtMonthLabel(hoveredMonth)}
-                </div>
-
-                <div className="series-chart-tooltip__metric">
-                  {metric === 'frp'
-                    ? 'Fire Radiative Power'
-                    : 'Detections'}
-                </div>
-
-                {tooltipValues.length > 0 ? (
-                  <div className="series-chart-tooltip__values">
-                    {tooltipValues.map(({ source, color, value }) => (
-                      <div
-                        className="series-chart-tooltip__row"
-                        key={source}
-                      >
-                        <span className="series-chart-tooltip__source">
-                          <i style={{ background: color }} />
-                          {source}
-                        </span>
-
-                        <strong>
-                          {formatValue(value, metric)}
-                          {metric === 'frp' ? ' MW' : ''}
-                        </strong>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="series-chart-tooltip__empty">
-                    No measurements for this month.
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {!loadingMetric && visibleGroups.length === 0 && (
-        <div className="series-window__empty-chart">
-          No data sources selected. Enable a source below to display its
-          series.
-        </div>
-      )}
-
-      {!loadingMetric && (
-        <div
-          className="series-window__legend"
-          aria-label="Data source legend"
-        >
-          {groups.map((group) => (
-            <label
-              key={group.source}
-              className="series-window__legend-item"
+        <div className="series-sidebar__list">
+          {calendarEntries.map((entry) => (
+            <section
+              className="series-sidebar__month"
+              key={entry.month}
             >
-              <input
-                type="checkbox"
-                checked={visibleSources[group.source] !== false}
-                onChange={() => handleSourceToggle(group.source)}
-              />
+              <h3 className="series-sidebar__month-title">
+                {fmtMonthLabel(entry.month)}
+              </h3>
 
-              <span
-                className="series-swatch"
-                style={{ background: group.color }}
-                aria-hidden="true"
-              />
+              {entry.values.length > 0 ? (
+                <div className="series-sidebar__values">
+                  {entry.values.map((item) => (
+                    <div
+                      className="series-sidebar__value"
+                      key={item.source}
+                      style={{ backgroundColor: item.color }}
+                      title={`${item.source}: ${formatValue(item.value, metric)}`}
+                    >
+                      <span className="series-sidebar__source">
+                        {item.source}
+                      </span>
 
-              <span>{group.source}</span>
-            </label>
+                      <strong className="series-sidebar__number">
+                        {formatValue(item.value, metric)}
+                        {metric === 'frp' ? ' MW' : ''}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="series-sidebar__empty">
+                  No measurements
+                </div>
+              )}
+            </section>
           ))}
+
+          {calendarEntries.length === 0 && (
+            <div className="series-sidebar__empty-list">
+              No months in the selected range.
+            </div>
+          )}
         </div>
-      )}
-
-      <div
-        className="series-window__resize"
-        aria-label="Resize chart window"
-        role="presentation"
-        onPointerDown={(event) => {
-          resizeRef.current = {
-            startX: event.clientX,
-            startY: event.clientY,
-            startWidth: panelSize.width,
-            startHeight: panelSize.height,
-          };
-
-          event.preventDefault();
-          event.stopPropagation();
-        }}
-      />
-    </div>
+      </aside>
+    </section>
   );
 }
