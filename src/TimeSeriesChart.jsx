@@ -90,16 +90,18 @@ export function TimeSeriesChart({
   const allValues = useMemo(
     () =>
       visibleGroups.flatMap((group) => {
-        const valueMap = new Map(group.points.map((point) => [monthKey(point.month), Number(point.value ?? 0)]));
-        return monthList.map((month) => valueMap.get(monthKey(month)) ?? 0);
+        const valueMap = new Map(group.points.map((point) => [monthKey(point.month), Number(point.value)]));
+        return monthList
+          .map((month) => valueMap.get(monthKey(month)))
+          .filter((val) => val !== undefined && !Number.isNaN(val));
       }),
     [monthList, visibleGroups],
   );
 
   const width = panelSize.width;
   const height = panelSize.height - 112;
-  const minY = Math.min(0, ...allValues, 0);
-  const maxY = Math.max(...allValues, 1);
+  const minY = Math.min(0, ...(allValues.length ? allValues : [0]));
+  const maxY = Math.max(...(allValues.length ? allValues : [1]), 1);
   const yRange = Math.max(maxY - minY, 1);
   const padding = 22;
 
@@ -254,20 +256,34 @@ export function TimeSeriesChart({
             })}
 
             {visibleGroups.map((group) => {
-              const valueMap = new Map(group.points.map((point) => [monthKey(point.month), Number(point.value ?? 0)]));
-              const d = monthList
-                .map((month, index) => {
-                  const value = valueMap.get(monthKey(month)) ?? 0;
-                  const x = xAt(index, monthList.length || 1);
-                  const y = yAt(value);
-                  return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
-                })
-                .join(' ');
+              const valueMap = new Map(group.points.map((point) => [monthKey(point.month), Number(point.value)]));
+              
+              let d = '';
+              let isStarted = false;
+
+              monthList.forEach((month, index) => {
+                const value = valueMap.get(monthKey(month));
+                
+                if (value === undefined || Number.isNaN(value)) {
+                  isStarted = false; // Break the path if data is missing for this month
+                  return;
+                }
+
+                const x = xAt(index, monthList.length || 1);
+                const y = yAt(value);
+
+                if (!isStarted) {
+                  d += ` M ${x} ${y}`;
+                  isStarted = true;
+                } else {
+                  d += ` L ${x} ${y}`;
+                }
+              });
 
               return (
                 <path
                   key={group.source}
-                  d={d}
+                  d={d.trim()}
                   fill="none"
                   stroke={group.color}
                   strokeWidth="2.25"
