@@ -51,19 +51,35 @@ export function ChartPage() {
     return () => controller.abort();
   }, [lat, lon, metric, retryCount, validCoordinates]);
 
-  const handleClose = () => {
-    window.close();
+  const handleRunForecast = async ({
+    metric: selectedMetric,
+    startMonth,
+    endMonth,
+  }) => {
+    /*
+     * TODO: Replace this with the actual forecasting API call.
+     *
+     * Expected request parameters:
+     * - lat
+     * - lon
+     * - metric
+     * - startMonth
+     * - endMonth
+     *
+     * The returned forecast data should eventually be merged
+     * into the series state using setSeries().
+     */
+    console.log('Forecast request:', {
+      lat,
+      lon,
+      metric: selectedMetric,
+      startMonth,
+      endMonth,
+    });
 
-    // If the browser does not allow scripts to close this tab,
-    // return to the main map.
-    window.setTimeout(() => {
-      if (!window.closed) {
-        const mapUrl = new URL(window.location.href);
-        mapUrl.search = '';
-        mapUrl.hash = '';
-        window.location.replace(mapUrl.toString());
-      }
-    }, 150);
+    throw new Error(
+      'The forecasting endpoint has not been connected yet.',
+    );
   };
 
   if (!validCoordinates) {
@@ -74,17 +90,14 @@ export function ChartPage() {
           <p>
             The URL does not contain valid latitude and longitude coordinates.
           </p>
-          <button type="button" onClick={handleClose}>
-            Close
-          </button>
         </section>
       </main>
     );
   }
 
-  if (loadingMetric) {
-    return (
-      <main className="chart-page">
+  return (
+    <main className="chart-page">
+      {loadingMetric && (
         <section className="chart-page__message" aria-live="polite">
           <h1>Loading monthly series</h1>
           <p>
@@ -92,13 +105,9 @@ export function ChartPage() {
             {formatCoordinate(lon)}…
           </p>
         </section>
-      </main>
-    );
-  }
+      )}
 
-  if (error) {
-    return (
-      <main className="chart-page">
+      {error && (
         <section className="chart-page__message" role="alert">
           <h1>Could not load monthly series</h1>
           <p>{error}</p>
@@ -110,28 +119,22 @@ export function ChartPage() {
             >
               Retry
             </button>
-
-            <button type="button" onClick={handleClose}>
-              Close
-            </button>
           </div>
         </section>
-      </main>
-    );
-  }
+      )}
 
-  return (
-    <main className="chart-page">
-      <TimeSeriesChart
-        metric={metric}
-        series={series}
-        onMetricChange={setMetric}
-        loadingMetric={loadingMetric}
-        error={error}
-        title="Monthly series"
-        subtitle={`${formatCoordinate(lat)}, ${formatCoordinate(lon)}`}
-        onClose={handleClose}
-      />
+      {!loadingMetric && !error && series && (
+        <TimeSeriesChart
+          metric={metric}
+          series={series}
+          onMetricChange={setMetric}
+          onRunForecast={handleRunForecast}
+          loadingMetric={loadingMetric}
+          error={error}
+          title="Monthly series"
+          subtitle={`${formatCoordinate(lat)}, ${formatCoordinate(lon)}`}
+        />
+      )}
     </main>
   );
 }
