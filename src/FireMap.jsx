@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapGL, { Source, Layer, NavigationControl, Popup } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
+import panIcon from './assets/pan.svg';
+import selectIcon from './assets/cross.svg';
+
 import {
   YEAR_LIMIT,
   fetchCoverage,
@@ -14,7 +17,7 @@ const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.j
 // Used until the API says which years exist.
 const FALLBACK_MIN_YEAR = 2000;
 const FALLBACK_MAX_YEAR = 2026;
-const STEP_MS = 900;
+const STEP_MS = 2000;
 
 const INITIAL_VIEW = { longitude: 23.7, latitude: 38.5, zoom: 6 };
 
@@ -88,7 +91,10 @@ export function FireMap() {
   const [sensorKey, setSensorKey] = useState('ALL');
   const [playing, setPlaying] = useState(false);
   const [selected, setSelected] = useState(null);
-  const [selectionMode, setSelectionMode] = useState('pan');
+
+  // Select point is the default interaction mode.
+  const [selectionMode, setSelectionMode] = useState('select');
+
   const [chartOpenError, setChartOpenError] = useState(null);
 
   // Coordinates displayed while hovering in Select point mode.
@@ -316,28 +322,94 @@ export function FireMap() {
     setYear(Number(e.target.value));
   };
 
+  const handleSelectMode = () => {
+    setChartOpenError(null);
+    setHoverCoordinates(null);
+    setSelectionMode('select');
+  };
+
+  const handlePanMode = () => {
+    setSelectionMode('pan');
+  };
+
   const ready = meta.status === 'ready' && year !== null;
   const errorForYear = yearError?.year === year ? yearError.message : null;
   const displayYear = year ?? maxYear;
 
-  // Shared styling for the Pan / Select buttons.
-  const modeButtonStyle = {
-    width: '32px',
-    height: '32px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 0,
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: '11px',
-    fontWeight: 600,
-    color: '#333',
-    background: '#fff',
-  };
-
   return (
     <div className="fire-map">
+      <style>
+        {`
+          .fire-map .maplibregl-ctrl-top-right {
+            top: calc(50% - 10px) !important;
+            right: 10px !important;
+            transform: none !important;
+          }
+
+          .fire-map .maplibregl-ctrl-top-right .maplibregl-ctrl {
+            margin: 0 !important;
+          }
+
+          .fire-map .maplibregl-ctrl-group {
+            overflow: hidden;
+            border-radius: 4px;
+            box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+          }
+
+          .fire-map .map-interaction-controls {
+            position: absolute;
+            top: calc(50% - 76px);
+            right: 10px;
+            z-index: 2;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border-radius: 4px;
+            box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+          }
+
+          .fire-map .map-interaction-controls button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 29px;
+            height: 29px;
+            padding: 0;
+            border: 0;
+            background: #fff;
+            color: #333;
+            cursor: pointer;
+          }
+
+          .fire-map .map-interaction-controls button + button {
+            border-top: 1px solid #ddd;
+          }
+
+          .fire-map .map-interaction-controls button:hover {
+            background: #f0f0f0;
+          }
+
+          .fire-map .map-interaction-controls button.is-active {
+            background: #e1e1e1;
+          }
+
+          .fire-map .map-interaction-controls button:focus-visible {
+            position: relative;
+            z-index: 1;
+            outline: 2px solid #2684ff;
+            outline-offset: -2px;
+          }
+
+          .fire-map .map-interaction-controls img {
+            display: block;
+            width: 17px;
+            height: 17px;
+            object-fit: contain;
+            pointer-events: none;
+          }
+        `}
+      </style>
+
       <MapGL
         initialViewState={INITIAL_VIEW}
         style={{ width: '100%', height: '100%' }}
@@ -349,7 +421,12 @@ export function FireMap() {
         onMouseMove={handleMapMouseMove}
         onMouseLeave={handleMapMouseLeave}
       >
-        <NavigationControl position="top-right" showCompass={false} />
+        <NavigationControl
+          position="top-right"
+          showZoom
+          showCompass
+          visualizePitch
+        />
 
         {shown && (
           <Source id="fires" type="geojson" data={shown.geojson}>
@@ -413,105 +490,76 @@ export function FireMap() {
         )}
       </MapGL>
 
-      {/* ---------- Top-right: map controls ---------- */}
-      <div
-        className="map-toolbar map-toolbar--top-right"
-        aria-label="Map tools"
-        style={{
-          position: 'absolute',
-          top: '10px',
-          right: '10px',
-          zIndex: 2,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'flex-end',
-          gap: '8px',
-        }}
-      >
-        {/* Pan / Select buttons, styled like the zoom controls. */}
+      {/* ---------- Top-right: coordinate readout ---------- */}
+      {selectionMode === 'select' && (
         <div
-          role="group"
-          aria-label="Map interaction mode"
+          className="map-coordinate-readout"
+          aria-live="polite"
           style={{
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-            borderRadius: '4px',
-            boxShadow: '0 0 0 2px rgba(0, 0, 0, 0.1)',
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            zIndex: 2,
+            width: '190px',
+            boxSizing: 'border-box',
+            padding: '9px 12px',
+            borderRadius: '6px',
+            background: 'rgba(20, 25, 32, 0.92)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            color: '#fdf6e3',
+            fontSize: '12px',
+            lineHeight: 1.6,
+            boxShadow: '0 3px 12px rgba(0, 0, 0, 0.25)',
+            pointerEvents: 'none',
           }}
         >
-          <button
-            type="button"
-            style={{
-              ...modeButtonStyle,
-              color: selectionMode === 'pan' ? '#111' : '#555',
-              background: selectionMode === 'pan' ? '#e6e6e6' : '#fff',
-              borderBottom: '1px solid #ddd',
-            }}
-            aria-pressed={selectionMode === 'pan'}
-            title="Pan map"
-            onClick={() => setSelectionMode('pan')}
-          >
-            Pan
-          </button>
+          {hoverCoordinates ? (
+            <>
+              <div>
+                <span style={{ opacity: 0.65 }}>Latitude </span>
+                <strong>{hoverCoordinates.latitude.toFixed(5)}°</strong>
+              </div>
 
-          <button
-            type="button"
-            style={{
-              ...modeButtonStyle,
-              color: selectionMode === 'select' ? '#111' : '#555',
-              background: selectionMode === 'select' ? '#e6e6e6' : '#fff',
-            }}
-            aria-pressed={selectionMode === 'select'}
-            title="Select point"
-            onClick={() => {
-              setChartOpenError(null);
-              setHoverCoordinates(null);
-              setSelectionMode('select');
-            }}
-          >
-            Select
-          </button>
+              <div>
+                <span style={{ opacity: 0.65 }}>Longitude </span>
+                <strong>{hoverCoordinates.longitude.toFixed(5)}°</strong>
+              </div>
+            </>
+          ) : (
+            <span style={{ opacity: 0.7 }}>
+              Move over the map to inspect coordinates.
+            </span>
+          )}
         </div>
+      )}
 
-        {/* Fixed coordinate display below the interaction buttons. */}
-        {selectionMode === 'select' && (
-          <div
-            className="map-coordinate-readout"
-            aria-live="polite"
-            style={{
-              width: '180px',
-              boxSizing: 'border-box',
-              padding: '9px 12px',
-              borderRadius: '6px',
-              background: 'rgba(20, 25, 32, 0.92)',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
-              color: '#fdf6e3',
-              fontSize: '12px',
-              lineHeight: 1.6,
-              boxShadow: '0 3px 12px rgba(0, 0, 0, 0.25)',
-              pointerEvents: 'none',
-            }}
-          >
-            {hoverCoordinates ? (
-              <>
-                <div>
-                  <span style={{ opacity: 0.65 }}>Latitude </span>
-                  <strong>{hoverCoordinates.latitude.toFixed(5)}°</strong>
-                </div>
+      {/* ---------- Right side: Pan / Select controls ---------- */}
+      <div
+        className="map-interaction-controls"
+        role="group"
+        aria-label="Map interaction mode"
+      >
+        <button
+          type="button"
+          className={selectionMode === 'pan' ? 'is-active' : ''}
+          aria-pressed={selectionMode === 'pan'}
+          aria-label="Pan map"
+          title="Pan map"
+          onClick={handlePanMode}
+        >
+          <img src={panIcon} alt="" />
+        </button>
 
-                <div>
-                  <span style={{ opacity: 0.65 }}>Longitude </span>
-                  <strong>{hoverCoordinates.longitude.toFixed(5)}°</strong>
-                </div>
-              </>
-            ) : (
-              <span style={{ opacity: 0.7 }}>
-                Move over the map to inspect coordinates.
-              </span>
-            )}
-          </div>
-        )}
+        <button
+          type="button"
+          className={selectionMode === 'select' ? 'is-active' : ''}
+          aria-pressed={selectionMode === 'select'}
+          aria-label="Select point"
+          title="Select point"
+          onClick={handleSelectMode}
+        >
+          <img src={selectIcon} alt="" />
+        </button>
       </div>
 
       {/* ---------- Top-left: sensor filter + live metrics ---------- */}
