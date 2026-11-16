@@ -50,8 +50,3 @@ site's address in the backend's `CORS_ORIGINS`:
 # .env (frontend), before building
 VITE_API_URL=https://api.your-domain.example
 ```
-
-## Sample data
-
-`make-sample-data.mjs` and `public/fires.geojson` are the old random test
-data. The app no longer uses them.
