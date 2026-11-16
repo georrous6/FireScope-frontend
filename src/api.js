@@ -44,3 +44,23 @@ export const fetchYear = (year, signal) =>
     { start_date: `${year}-01-01`, end_date: `${year}-12-31`, limit: YEAR_LIMIT },
     signal,
   );
+
+/** Monthly point series for a specific grid cell, grouped by source. */
+export const fetchHarmonizedCellSeries = (lat, lon, metric, signal) => {
+  const endpoint = metric === 'frp' ? '/detections/harmonized/cell/frp' : '/detections/harmonized/cell/detections';
+  return getJson(endpoint, { lat, lon }, signal);
+};
+
+/** Forecast monthly activity for a specific harmonized grid cell. */
+export const fetchHarmonizedCellForecast = (
+  lat,
+  lon,
+  metric,
+  horizon,
+  signal,
+) =>
+  getJson(
+    '/detections/harmonized/cell/forecast',
+    { lat, lon, metric, horizon },
+    signal,
+  );

@@ -75,6 +75,7 @@ body,
 }
 
 .segmented button {
+  min-width: 0;
   padding: 7px 6px;
   border: 0;
   border-radius: 6px;
@@ -95,6 +96,29 @@ body,
   background: var(--amber);
   color: #2a1608;
   font-weight: 600;
+}
+
+.map-mode {
+  margin-top: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.map-toolbar {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.map-toolbar--top-right {
+  top: 16px;
+  right: 18px;
+}
+
+.map-toolbar > * {
+  pointer-events: auto;
 }
 
 /* ---------- Stats ---------- */
@@ -163,8 +187,721 @@ body,
   font-size: 0.74rem;
 }
 
+/* ---------- Point popup ---------- */
+.point-popup {
+  min-width: 260px;
+}
+
+.point-popup-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+}
+
+.point-popup-header strong {
+  color: var(--ink);
+}
+
+.point-series-toggle {
+  width: 100%;
+  margin-bottom: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.point-series-toggle button {
+  min-width: 0;
+  padding-inline: 10px;
+  white-space: nowrap;
+}
+
+.series-chart-wrap {
+  display: grid;
+  gap: 8px;
+}
+
+.series-chart {
+  width: 100%;
+  height: 150px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* ---------- Monthly series panel ---------- */
+
+.series-panel {
+  position: absolute;
+  top: 72px;
+  right: 18px;
+  z-index: 6;
+}
+
+/*
+ * Floating chart window styles are retained for any chart
+ * rendered inside the map. The standalone chart page uses
+ * .series-window--fullscreen below.
+ */
+.series-window {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(640px, calc(100vw - 36px));
+  min-width: 360px;
+  min-height: 260px;
+  border-radius: 18px;
+  border: 1px solid var(--panel-edge);
+  background: rgba(20, 15, 12, 0.92);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.52);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  overflow: hidden;
+}
+
+/* ---------- Full-page chart layout ---------- */
+
+.chart-page {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #10100f;
+}
+
+.chart-page > .series-window--fullscreen {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/*
+ * Two-column layout:
+ * - Main chart and controls on the left.
+ * - Monthly values sidebar on the right.
+ */
+.series-window--fullscreen {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #10100f;
+}
+
+/* ---------- Main chart column ---------- */
+
+.series-window__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  border-right: 1px solid rgba(255, 237, 160, 0.12);
+}
+
+.series-window__header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.series-window__title {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.series-window__subtitle {
+  margin-top: 4px;
+  color: var(--ink-dim);
+  font-size: 0.75rem;
+}
+
+.series-window__close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.series-window__close:hover {
+  border-color: rgba(255, 237, 160, 0.3);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* ---------- Chart toolbar ---------- */
+
+.series-window__toolbar {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.65fr) minmax(0, 1.35fr);
+  flex: 0 0 auto;
+  gap: 16px;
+  align-items: end;
+  padding: 14px 22px 12px;
+}
+
+.series-window__toolbar .point-series-toggle {
+  align-self: end;
+  margin: 0;
+}
+
+.series-window__range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.series-window__range-group {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.series-window__range-group > span {
+  color: var(--ink-dim);
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.series-window__range-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.series-window__range-picker select {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 237, 160, 0.2);
+  border-radius: 9px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.08),
+    rgba(255, 255, 255, 0.03)
+  );
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 500;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.series-window__range-picker select:first-child {
+  min-width: 68px;
+}
+
+.series-window__range-picker select:last-child {
+  min-width: 68px;
+}
+
+.series-window__range-picker select:hover {
+  border-color: rgba(255, 237, 160, 0.34);
+}
+
+.series-window__range-picker select option {
+  background: #1c1511;
+  color: var(--ink);
+}
+
+/* ---------- Chart notices ---------- */
+
+.series-window__main > .notice {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 8px 22px;
+}
+
+.series-window__main > .notice-error {
+  color: #ff9d8a;
+}
+
+/* ---------- Interactive uPlot chart ---------- */
+
+.series-window__body {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 18px 12px;
+  overflow: hidden;
+}
+
+.series-window__chart-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 180px;
+}
+
+.series-window__chart {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 180px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* uPlot container */
+.series-window__chart .uplot {
+  width: 100%;
+  height: 100%;
+  font-family: var(--font);
+  background: transparent;
+}
+
+/* uPlot's interactive overlay */
+.series-window__chart .u-over {
+  cursor: crosshair;
+}
+
+/* uPlot axes */
+.series-window__chart .u-axis {
+  font-family: var(--font);
+}
+
+.series-window__chart .u-label {
+  color: var(--ink-dim);
+}
+
+/* uPlot crosshair */
+.series-window__chart .u-cursor-x {
+  border-left: 1px dashed var(--straw);
+  opacity: 0.9;
+}
+
+.series-window__chart .u-cursor-y {
+  display: none;
+}
+
+/* ---------- Chart tooltip ---------- */
+
+.series-chart-tooltip {
+  position: absolute;
+  z-index: 5;
+  top: 8px;
+  min-width: 180px;
+  max-width: min(250px, 70%);
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 237, 160, 0.2);
+  border-radius: 10px;
+  background: rgba(20, 15, 12, 0.96);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.42);
+  color: var(--ink);
+  pointer-events: none;
+  transform: translateX(-50%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.series-chart-tooltip__month {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--straw);
+  font-variant-numeric: tabular-nums;
+}
+
+.series-chart-tooltip__metric {
+  margin-top: 2px;
+  color: var(--ink-dim);
+  font-size: 0.67rem;
+}
+
+.series-chart-tooltip__values {
+  display: grid;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.series-chart-tooltip__row,
+.series-chart-tooltip__source {
+  display: flex;
+  align-items: center;
+}
+
+.series-chart-tooltip__row {
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.7rem;
+}
+
+.series-chart-tooltip__source {
+  min-width: 0;
+  gap: 6px;
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.series-chart-tooltip__source i {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.series-chart-tooltip__row strong {
+  flex: none;
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.series-chart-tooltip__empty,
+.series-window__empty-chart {
+  color: var(--ink-dim);
+  font-size: 0.75rem;
+}
+
+.series-chart-tooltip__empty {
+  margin-top: 9px;
+}
+
+/* ---------- Chart legend ---------- */
+
+.series-window__legend {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  max-height: 100px;
+  padding: 8px 22px 16px;
+  overflow-y: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 0.72rem;
+  color: var(--ink-dim);
+}
+
+.series-window__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.series-window__legend-item input {
+  accent-color: var(--amber);
+  cursor: pointer;
+}
+
+.series-swatch {
+  display: inline-block;
+  flex: 0 0 10px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+
+.series-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 0.72rem;
+  color: var(--ink-dim);
+}
+
+.series-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---------- Empty chart state ---------- */
+
+.series-window__empty-chart {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 120px;
+  place-items: center;
+  padding: 24px;
+  text-align: center;
+}
+
+/* ---------- Monthly values sidebar ---------- */
+
+.series-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: rgba(20, 15, 12, 0.52);
+}
+
+.series-sidebar__header {
+  flex: 0 0 auto;
+  padding: 20px 18px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.series-sidebar__title {
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.series-sidebar__subtitle {
+  margin-top: 4px;
+  color: var(--ink-dim);
+  font-size: 0.72rem;
+}
+
+/* ---------- Sidebar color scale ---------- */
+
+.series-sidebar__scale {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--ink-dim);
+  font-size: 0.64rem;
+  white-space: nowrap;
+}
+
+.series-sidebar__scale-bar {
+  flex: 1 1 auto;
+  height: 8px;
+  min-width: 30px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    #fdf6e3 0%,
+    #ffeda0 33%,
+    #feb24c 66%,
+    #f03b20 100%
+  );
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+/* ---------- Scrollable monthly list ---------- */
+
+.series-sidebar__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 8px 12px 16px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 237, 160, 0.3) transparent;
+}
+
+.series-sidebar__list::-webkit-scrollbar {
+  width: 7px;
+}
+
+.series-sidebar__list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.series-sidebar__list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(255, 237, 160, 0.28);
+  background-clip: padding-box;
+}
+
+.series-sidebar__list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 237, 160, 0.45);
+  background-clip: padding-box;
+}
+
+/* ---------- Individual month ---------- */
+
+.series-sidebar__month {
+  padding: 11px 6px 13px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.series-sidebar__month:last-child {
+  border-bottom: 0;
+}
+
+.series-sidebar__month-title {
+  margin: 0 0 9px;
+  color: var(--straw);
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Values within a month ---------- */
+
+.series-sidebar__values {
+  display: grid;
+  gap: 5px;
+}
+
+.series-sidebar__value {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid rgba(40, 25, 10, 0.12);
+  border-radius: 6px;
+  color: #24150d;
+  transition: filter 0.12s ease, transform 0.12s ease;
+}
+
+.series-sidebar__value:hover {
+  filter: brightness(0.96);
+  transform: translateX(2px);
+}
+
+.series-sidebar__source {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(36, 21, 13, 0.82);
+  font-size: 0.66rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.series-sidebar__number {
+  flex: 0 0 auto;
+  color: #24150d;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- Empty sidebar states ---------- */
+
+.series-sidebar__empty {
+  padding: 8px 9px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--ink-dim);
+  font-size: 0.68rem;
+  font-style: italic;
+}
+
+.series-sidebar__empty-list {
+  padding: 24px 12px;
+  color: var(--ink-dim);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+/* ---------- Empty series window ---------- */
+
+.series-window--empty {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  justify-content: flex-start;
+  border: 0;
+  border-radius: 0;
+  background: #10100f;
+  box-shadow: none;
+}
+
+.series-window--empty .series-window__header {
+  flex: 0 0 auto;
+}
+
+.series-window--empty > .notice {
+  padding: 18px 22px;
+}
+
+/* ---------- Standalone chart page messages ---------- */
+
+.chart-page__message {
+  width: min(480px, calc(100% - 32px));
+  margin: auto;
+  padding: 28px;
+  border: 1px solid rgba(253, 246, 227, 0.12);
+  border-radius: 12px;
+  background: #191715;
+  color: #fdf6e3;
+  text-align: center;
+}
+
+.chart-page__message h1 {
+  margin: 0 0 12px;
+  font-size: 20px;
+}
+
+.chart-page__message p {
+  color: rgba(253, 246, 227, 0.7);
+  line-height: 1.6;
+}
+
+.chart-page__actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.chart-page__message button {
+  padding: 9px 16px;
+  border: 1px solid rgba(253, 246, 227, 0.2);
+  border-radius: 6px;
+  background: #292521;
+  color: #fdf6e3;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chart-page__message button:hover {
+  background: #39332d;
+}
+
 /* ---------- Timeline bar ---------- */
+
 .panel-timeline {
+  position: absolute;
   bottom: 28px;
   left: 50%;
   transform: translateX(-50%);
@@ -228,7 +965,8 @@ body,
   color: var(--straw);
 }
 
-/* Range slider */
+/* ---------- Range slider ---------- */
+
 .timeline input[type='range'] {
   width: 100%;
   margin: 0;
@@ -271,9 +1009,11 @@ body,
   box-shadow: 0 0 0 1px var(--amber);
 }
 
-/* Keyboard focus */
+/* ---------- Keyboard focus ---------- */
+
 button:focus-visible,
-.timeline input[type='range']:focus-visible {
+.timeline input[type='range']:focus-visible,
+.series-window__range-picker select:focus-visible {
   outline: 2px solid var(--straw);
   outline-offset: 3px;
 }
@@ -281,6 +1021,7 @@ button:focus-visible,
 /* ---------- Popup (MapLibre overrides) ----------
    Prefixed with .fire-map so these win over maplibre-gl.css,
    which is loaded after this file. */
+
 .fire-map .maplibregl-popup-content {
   padding: 12px 14px;
   border-radius: 10px;
@@ -322,6 +1063,8 @@ button:focus-visible,
   border-left-color: #1c1511;
 }
 
+/* ---------- Popup content ---------- */
+
 .popup {
   margin: 0;
   min-width: 190px;
@@ -347,12 +1090,189 @@ button:focus-visible,
   font-variant-numeric: tabular-nums;
 }
 
+/* ---------- Medium screens ---------- */
+
+@media (max-width: 900px) {
+  .series-window--fullscreen {
+    grid-template-columns: minmax(0, 1fr) 280px;
+  }
+
+  .series-window__toolbar {
+    grid-template-columns: minmax(130px, 0.55fr) minmax(0, 1.45fr);
+    gap: 10px;
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .series-window__header {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .series-window__body {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .series-window__legend {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+}
+
 /* ---------- Small screens ---------- */
+
+@media (max-width: 600px) {
+  .series-window {
+    min-width: 0;
+    max-width: calc(100vw - 16px);
+  }
+
+  /*
+   * On narrow screens, stack the chart and values list.
+   * The sidebar becomes a horizontal lower section.
+   */
+  .chart-page {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .chart-page > .series-window--fullscreen {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .series-window--fullscreen {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .series-window__main {
+    flex: 1 1 60%;
+    min-height: 300px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 237, 160, 0.12);
+  }
+
+  .series-window__toolbar {
+    grid-template-columns: 1fr;
+    gap: 9px;
+    padding: 10px 12px;
+  }
+
+  .point-series-toggle {
+    width: 100%;
+  }
+
+  .series-window__range {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .series-window__range-group {
+    padding: 6px;
+  }
+
+  .series-window__forecast-button {
+    border-radius: 10px;
+  }
+
+  .series-window__range-picker {
+    gap: 4px;
+  }
+
+  .series-window__range-picker select {
+    padding: 0 6px;
+    font-size: 0.7rem;
+  }
+
+  .series-window__body {
+    min-height: 120px;
+    padding: 4px 8px 8px;
+  }
+
+  .series-window__chart-wrap,
+  .series-window__chart {
+    min-height: 120px;
+  }
+
+  .series-window__header {
+    padding: 12px 14px 10px;
+  }
+
+  .series-window__legend {
+    max-height: 72px;
+    padding: 7px 12px 10px;
+    gap: 6px 10px;
+  }
+
+  .series-chart-tooltip {
+    min-width: 155px;
+    padding: 8px 10px;
+  }
+
+  .series-sidebar {
+    flex: 0 1 40%;
+    min-height: 150px;
+    border-top: 0;
+  }
+
+  .series-sidebar__header {
+    padding: 10px 14px 8px;
+  }
+
+  .series-sidebar__title {
+    font-size: 0.82rem;
+  }
+
+  .series-sidebar__scale {
+    padding: 7px 14px;
+  }
+
+  .series-sidebar__list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-content: start;
+    gap: 0 10px;
+    padding: 4px 10px 12px;
+  }
+
+  .series-sidebar__month {
+    min-width: 0;
+    padding: 8px 4px;
+  }
+
+  .series-sidebar__month-title {
+    margin-bottom: 6px;
+    font-size: 0.7rem;
+  }
+
+  .series-sidebar__value {
+    gap: 5px;
+    min-height: 28px;
+    padding: 5px 6px;
+  }
+
+  .series-sidebar__source {
+    font-size: 0.6rem;
+  }
+
+  .series-sidebar__number {
+    font-size: 0.63rem;
+  }
+
+  .series-window--empty {
+    min-height: 100%;
+  }
+}
+
 @media (max-width: 520px) {
   .panel-info {
     top: 8px;
     left: 8px;
-    width: calc(100vw - 16px - 52px); /* leave room for zoom buttons */
+    width: calc(100vw - 16px - 52px);
     padding: 12px 14px;
   }
 
@@ -367,5 +1287,25 @@ button:focus-visible,
 
   .year-readout {
     font-size: 1.3rem;
+  }
+}
+
+/* ---------- Very narrow screens ---------- */
+
+@media (max-width: 380px) {
+  .series-window__range {
+    gap: 6px;
+  }
+
+  .series-window__range-picker {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .series-window__range-picker select {
+    width: 100%;
+  }
+
+  .series-sidebar__list {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
